@@ -469,6 +469,19 @@ templ NewTaskOptionsRow() {
       label.textContent = source.textContent;
      });
     }
+    var tagRow = details.querySelector('[data-detail-property="tag"]');
+    var quickTag = row.querySelector('[data-quick-tag]');
+    var agentRow = details.querySelector('[data-detail-property="agent_definition_id"]');
+    var quickAgent = row.querySelector('[data-detail-property="agent_definition_id"]');
+    var quickCategory = row.querySelector('[data-detail-property="category"]');
+    function syncState() {
+     quickTag.dataset.value = tagRow.dataset.value;
+     quickTag.querySelector('[data-quick-label]').textContent = tagRow.querySelector('[data-property-label]').textContent;
+     quickTag.dataset.on = String(!!tagRow.dataset.value);
+     quickAgent.disabled = agentRow.disabled;
+     quickAgent.dataset.on = String(!!quickAgent.dataset.value);
+     quickCategory.dataset.on = String(quickCategory.dataset.value === 'active');
+    }
     var observer = new MutationObserver(function(records) {
      if (!root.isConnected) { observer.disconnect(); return; }
      records.forEach(function(record) {
@@ -476,27 +489,13 @@ templ NewTaskOptionsRow() {
       var target = node && node.closest('[data-detail-property]');
       if (target && target.dataset.detailProperty !== 'tag') mirror(target);
      });
+     syncState();
     });
     root.querySelectorAll('[data-detail-property="category"], [data-detail-property="agent_definition_id"]').forEach(function(el) {
-     observer.observe(el, {attributes:true, attributeFilter:['data-value'], childList:true, subtree:true, characterData:true});
+     observer.observe(el, {attributes:true, attributeFilter:['data-value', 'disabled'], childList:true, subtree:true, characterData:true});
     });
-    var tagRow = details.querySelector('[data-detail-property="tag"]');
-    var quickTag = row.querySelector('[data-quick-tag]');
-    function syncTag() {
-     quickTag.dataset.value = tagRow.dataset.value;
-     quickTag.querySelector('[data-quick-label]').textContent = tagRow.querySelector('[data-property-label]').textContent;
-     quickTag.dataset.on = String(!!tagRow.dataset.value);
-    }
-    new MutationObserver(syncTag).observe(tagRow, {attributes:true, attributeFilter:['data-value'], childList:true, subtree:true, characterData:true});
-    var agentRow = details.querySelector('[data-detail-property="agent_definition_id"]');
-    var quickAgent = row.querySelector('[data-detail-property="agent_definition_id"]');
-    function syncAgent() { quickAgent.disabled = agentRow.disabled; quickAgent.dataset.on = String(!!quickAgent.dataset.value); }
-    new MutationObserver(syncAgent).observe(agentRow, {attributes:true, attributeFilter:['disabled', 'data-value']});
-    new MutationObserver(syncAgent).observe(quickAgent, {attributes:true, attributeFilter:['data-value']});
-    var quickCategory = row.querySelector('[data-detail-property="category"]');
-    function syncCategory() { quickCategory.dataset.on = String(quickCategory.dataset.value === 'active'); }
-    new MutationObserver(syncCategory).observe(quickCategory, {attributes:true, attributeFilter:['data-value']});
-    syncAgent(); syncCategory(); syncTag();
+    observer.observe(tagRow, {attributes:true, attributeFilter:['data-value'], childList:true, subtree:true, characterData:true});
+    syncState();
     var merge = row.querySelector('[data-quick-auto-merge]');
     function autoMerge() { return details.querySelector('#task-auto-merge-panel [name="auto_merge"]'); }
     function syncMerge() { var on = !!autoMerge()?.checked; merge.dataset.on = String(on); merge.setAttribute('aria-pressed', String(on)); }
