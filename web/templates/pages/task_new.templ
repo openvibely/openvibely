@@ -442,7 +442,8 @@ templ NewTaskOptionsRow() {
    </button>
   </div>
   <style>
-   .ov-task-options { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:8px 4px 0; }
+   #main-content #tab-chat:has([data-new-task-options]) .chat-input-shadow-gutter { padding-bottom:0; }
+   .ov-task-options { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:4px 4px 0; }
    html[data-thread-width="focused"] .ov-task-options { max-width:820px; width:100%; margin:0 auto; }
    .ov-task-options-group { display:flex; align-items:center; gap:2px; flex-wrap:wrap; min-width:0; }
    .ov-task-option { display:inline-flex; align-items:center; gap:5px; height:28px; padding:0 9px; border:0; border-radius:8px; background:transparent; color:oklch(var(--bc)/.52); font-size:12px; line-height:1; white-space:nowrap; cursor:pointer; transition:background .14s ease, color .14s ease; }
