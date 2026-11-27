@@ -225,7 +225,14 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
  assert(list.offsetWidth===list.clientWidth,'no scrollbar when models fit');
  list.style.maxHeight='75px';await wait();
  assert(list.scrollHeight>list.clientHeight&&list.offsetWidth>list.clientWidth,'visible scrollbar when overflowing');
- list.scrollTop=50;await wait();assert(list.scrollTop>0,'list remains scrollable');
+ list.scrollTop=0;
+ const wheel=(target,dy,extra={})=>{const e=new WheelEvent('wheel',{deltaY:dy,bubbles:true,cancelable:true,...extra});target.dispatchEvent(e);return e;};
+ assert(wheel(list.firstElementChild,50).defaultPrevented&&list.scrollTop>0,'wheel on model row scrolls overflowing favorites');
+ assert(wheel(list,-50).defaultPrevented&&list.scrollTop===0,'wheel scrolls back to first model');
+ wheel(list,2,{deltaMode:1});assert(list.scrollTop===32,'line-mode wheel units');
+ assert(!wheel(list,50,{ctrlKey:true}).defaultPrevented&&list.scrollTop===32,'preserve zoom gestures');
+ assert(!wheel(list,5,{deltaX:60}).defaultPrevented&&list.scrollTop===32,'preserve horizontal gestures');
+ wheel(list,1,{deltaMode:2});assert(list.scrollTop>32,'page-mode wheel units');
  assert(!panel.querySelector('.ov-mp-effort').hidden,'effort stays accessible while list scrolls');
  list.style.maxHeight='';await wait();
  const defaultRow=panel.querySelector('.ov-mp-pick[data-model=default]');

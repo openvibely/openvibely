@@ -45,6 +45,19 @@
     sublist = el("div", "ov-menu-list ov-menu-scroll ov-mp-sublist");
   back.type = "button";
   back.setAttribute("aria-label", "Back to providers");
+  // WebKit can miss native wheel scrolling in floating menus. Keep vertical
+  // gestures inside the model lists, including when they reach either end.
+  for (const scrollList of [list, sublist]) {
+    scrollList.addEventListener("wheel", (event) => {
+      if (event.ctrlKey || event.metaKey || !event.deltaY ||
+          Math.abs(event.deltaX) > Math.abs(event.deltaY) ||
+          scrollList.scrollHeight <= scrollList.clientHeight) return;
+      const unit = event.deltaMode === 1 ? 16 :
+        event.deltaMode === 2 ? scrollList.clientHeight : 1;
+      scrollList.scrollTop += event.deltaY * unit;
+      event.preventDefault();
+    }, {passive: false});
+  }
   subhead.append(back);
   subhead.hidden = true;
   sub.append(subhead, sublist);
