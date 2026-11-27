@@ -1877,8 +1877,12 @@ func TestChatInputForm_AttachmentUploadsAppendToCurrentSession(t *testing.T) {
 					t.Fatalf("attachment upload script missing %q", r)
 				}
 			}
-			if count := strings.Count(content, "listContainer.innerHTML = '';"); count != 1 {
-				t.Fatalf("attachment upload script must not clear previews after upload, while Clear All should still clear intentionally; got %d clear calls", count)
+			// Fixed-destination uploads append to their session. Destination transfers
+			// replace the previews atomically only after re-staging all files.
+			uploadStart := strings.Index(content, "async function uploadFiles(")
+			uploadEnd := strings.Index(content[uploadStart:], "function handleFiles(")
+			if strings.Contains(content[uploadStart:uploadStart+uploadEnd], "listContainer.innerHTML = '';") {
+				t.Fatal("fixed-destination upload must not clear existing previews")
 			}
 		})
 	}
