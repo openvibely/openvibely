@@ -5795,7 +5795,7 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 						var nav = performance.getEntriesByType && performance.getEntriesByType('navigation')[0];
 						var seen = false;
 						try { seen = sessionStorage.getItem('openvibely.splash') === '1'; sessionStorage.setItem('openvibely.splash', '1'); } catch (_) { seen = true; }
-						if (seen || (nav && nav.type !== 'navigate') || matchMedia('(prefers-reduced-motion: reduce)').matches) { splash.remove(); return; }
+						if (seen || navigator.webdriver || (nav && nav.type !== 'navigate') || matchMedia('(prefers-reduced-motion: reduce)').matches) { splash.remove(); return; }
 						var start = performance.now();
 						var orbits = splash.querySelectorAll('.ov-splash-orbits > g'), waves = splash.querySelectorAll('.ov-splash-wave'), amb = splash.querySelector('.ov-splash-amb');
 						var angles = [22, 165, 290], speeds = [.34, -.24, .48];
