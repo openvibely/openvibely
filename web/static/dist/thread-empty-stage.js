@@ -177,7 +177,7 @@
   function init(stage) {
     if (stage._ovInit) return;
     stage._ovInit = true;
-    var img = loadImage(stageSrc(stage));
+    loadImage(stageSrc(stage));
     function start() {
       if (!stage.isConnected || stage.hidden) return;
       if (reduced && reduced.matches) drawStatic(stage);
