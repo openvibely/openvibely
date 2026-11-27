@@ -54,6 +54,14 @@ func TestGeminiUsageMeterStyles(t *testing.T) {
    assert(svg.children.some(n=>n.tag==='path'&&n.attrs.d.endsWith(' Z')));
    const weeklyOnly=svgFor({...account,data:{limits:account.data.limits.slice(0,1)}},style);
    assert(!weeklyOnly.children.some(n=>n.tag==='circle'));
+   const tracks=weeklyOnly.children.filter(n=>n.attrs.stroke==='var(--ov-usage-used)');
+   assert.equal(tracks.length,1);
+   if(style==='circle-dots')assert(tracks[0].attrs.d.endsWith(' Z'));
+   else {
+    assert(tracks[0].attrs.d.includes('0 1 1'));
+    assert.equal(weeklyOnly.children.find(n=>n.tag==='text').textContent,'80');
+   }
+   assert.equal(weeklyOnly.children.find(n=>n.attrs['stroke-dasharray'])?.attrs['stroke-dasharray'],'80 100');
    assert.equal(svg.children.find(n=>n.tag==='text')?.textContent,style==='circle-dots-number'?'80':undefined);
   }
   if(style==='bars')assert(svg.children.some(n=>n.tag==='rect'&&Number(n.attrs.width)<10));
