@@ -788,11 +788,30 @@ document.body.dataset.testResult='pass';
 func TestBrowserFunctional_SharedChatDestinationModels(t *testing.T) {
 	chrome := testChromePath(t)
 	var content bytes.Buffer
+	var mu sync.Mutex
+	saved := "previous-model"
 	err := ChatInputForm(ChatInputFormConfig{FormID: "shared-chat-form", InputID: "message-input", TargetID: "messages", PostEndpoint: "/chat/send", Agents: []models.LLMConfig{{ID: "local-model", Name: "Local model", Provider: models.ProviderOpenAI}}, ShowModelSelector: true, ProjectChoices: []models.Project{{ID: "local", Name: "Local"}, {ID: "r-1234567890abcdef-project", Name: "Remote"}}, ProjectInputID: "destination", ProjectSendURL: "/chat/send?project_id="}).Render(context.Background(), &content)
 	if err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/conversation/model-settings" {
+			if r.URL.Query().Get("project_id") != "r-1234567890abcdef-project" {
+				t.Errorf("wrong preferences destination: %s", r.URL.RawQuery)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if r.Method == http.MethodPost {
+				_ = r.ParseForm()
+				saved = r.FormValue("agent_id")
+			}
+			selected := r.URL.Query().Get("agent_id")
+			if selected == "" {
+				selected = saved
+			}
+			_ = json.NewEncoder(w).Encode(map[string]string{"agent_id": selected})
+			return
+		}
 		if r.URL.Path == "/tasks/new" {
 			if r.URL.Query().Get("project_id") != "r-1234567890abcdef-project" {
 				t.Errorf("unexpected destination %s", r.URL.RawQuery)
@@ -816,6 +835,13 @@ func TestBrowserFunctional_SharedChatDestinationModels(t *testing.T) {
  assert(!picker.parentElement.querySelector('[data-value="local-model"]'),'local options removed');
  assert(form.querySelector('[name="agent_id"]').value==='default','old selection reset');
  assert(!picker.disabled,'picker available');
+ await picker._ovModelState.ready;
+ window._setChatCustomSelectValue(picker,'r-1234567890abcdef-model');
+ picker.dispatchEvent(new CustomEvent('chat-select-change',{detail:{value:'r-1234567890abcdef-model'},bubbles:true}));
+ await picker._ovModelState.ready;
+ await picker._ovModelState.pending;
+ const saved=await fetch('/conversation/model-settings?project_id=r-1234567890abcdef-project').then(r=>r.json());
+ assert(saved.agent_id==='r-1234567890abcdef-model','destination remembers chosen model for replacement composer');
  document.body.dataset.testResult='pass';
  }catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack;}})();</script></body></html>`)
 	}))

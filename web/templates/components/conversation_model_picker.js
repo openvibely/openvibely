@@ -195,7 +195,11 @@
   }
   function settingsEndpoint(btn) {
     const form = btn.closest("form");
-    const endpoint = form.getAttribute("data-model-select-endpoint");
+    const destination = form.querySelector('[data-project-send-url][data-project-input]');
+    const project = destination && document.getElementById(destination.dataset.projectInput)?.value;
+    const endpoint = destination
+      ? (project ? '/conversation/model-settings?project_id=' + encodeURIComponent(project) : '')
+      : form.getAttribute("data-model-select-endpoint");
     if (!endpoint) return endpoint;
     const url = new URL(endpoint, window.location.href);
     if (form.dataset.conversationTaskId)
@@ -259,7 +263,8 @@
   function save(btn) {
     const s = state(btn);
     sync(btn);
-    if (!settingsEndpoint(btn)) {
+    const endpoint = settingsEndpoint(btn);
+    if (!endpoint) {
       return Promise.resolve();
     }
     const body = new URLSearchParams({
@@ -268,7 +273,7 @@
       service_tier: tierField(btn)?.value || "",
     });
     const request = () =>
-      fetch(settingsEndpoint(btn), { method: "POST", body }).then(async (r) => {
+      fetch(endpoint, { method: "POST", body }).then(async (r) => {
         if (!r.ok) throw await settingsError(r, "Could not save model settings. Try again.");
       });
     s.pending = (s.pending || Promise.resolve()).catch(() => {}).then(request);
