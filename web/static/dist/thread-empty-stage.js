@@ -194,7 +194,14 @@
     else ready();
   }
 
-  function scan() { document.querySelectorAll('[data-thread-empty-stage]').forEach(init); }
+  function scan() {
+    document.querySelectorAll('[data-thread-empty-stage]').forEach(function(stage) {
+      // Settings retains the workspace under a hidden wrapper. Its canvas cannot
+      // repaint there, so refresh initialized backdrops when the workspace returns.
+      if (!stage._ovInit) init(stage);
+      else if (!stage._ovPlaying && !stage.hidden) drawStatic(stage);
+    });
+  }
 
   function watch(stage) {
     var timer = 0;
