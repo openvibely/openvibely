@@ -1113,7 +1113,7 @@
   document.addEventListener(
     "submit",
     (e) => {
-      if (e.target.dataset.destinationModelsPending === "true") {
+      if ((e.target.dataset.destinationModelsPending === "true" || e.target.dataset.destinationAttachmentsPending === "true")) {
         e.preventDefault();
         e.stopImmediatePropagation();
         return;

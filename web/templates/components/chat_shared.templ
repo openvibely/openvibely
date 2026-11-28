@@ -2509,7 +2509,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							form.dispatchEvent(submitEvent);
 						}
 							function submitComposer(endpoint, intent, payload) {
-								if (!endpoint || form.dataset.destinationModelsPending === 'true') return;
+								if (!endpoint || (form.dataset.destinationModelsPending === 'true' || form.dataset.destinationAttachmentsPending === 'true')) return;
 								var submittedMessage = payload && typeof payload.message === 'string' ? payload.message : composerMessage();
 								if (submittedMessage.trim() === '') return;
 								if (intent === 'steer' && typeof htmx !== 'undefined') {
@@ -2882,7 +2882,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							});
 						});
 					}
-					return { sessionID: sessionID, attachments: attachments };
+					return { sessionID: sessionID, attachments: attachments, projectID: targetForm.dataset.attachmentProject || '' };
 				}
 
 				window.saveChatPendingAttachmentState = function(formOrID) {
@@ -2916,6 +2916,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					var targetPreview = targetForm.querySelector('[id$="-attachments-preview"]');
 					var targetList = targetForm.querySelector('[id$="-attachments-list"]');
 					if (!targetSession || !targetList) return false;
+					targetForm.dataset.attachmentProject = state.projectID || '';
 					targetSession.value = state.sessionID;
 					targetSession.setAttribute('value', state.sessionID);
 					targetList.innerHTML = '';
@@ -2928,6 +2929,10 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			// Clear attachments function (registered on window for onclick handlers)
 				window[clearFuncName] = function() {
 					attachmentUploadGeneration++;
+                    if (destinationAttachmentController) destinationAttachmentController.abort();
+                    destinationAttachments = [];
+                    attachmentRetry.hidden = true;
+                    setAttachmentsPending(false);
 					if (preview) preview.classList.add('hidden');
 					if (listContainer) listContainer.innerHTML = '';
 					if (sessionInput) {
@@ -2941,6 +2946,89 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					}
 				};
 				window.restoreChatPendingAttachmentState(form);
+                var destinationAttachmentController = null;
+                var destinationAttachments = Array.from(listContainer ? listContainer.querySelectorAll('[data-pending-attachment]') : []).map(function(row) {
+                    return {filename: row.dataset.pendingAttachmentFilename, size: Number(row.dataset.pendingAttachmentSize), media_type: row.dataset.pendingAttachmentMediaType,
+                        session_id: row.dataset.pendingAttachmentSession || sessionInput.value};
+                });
+                var attachmentRetry = document.createElement('button');
+                attachmentRetry.type = 'button';
+                attachmentRetry.className = 'btn btn-ghost btn-xs';
+                attachmentRetry.hidden = true;
+                attachmentRetry.textContent = 'Attachments unavailable — Retry';
+                attachmentRetry.addEventListener('click', transferDestinationAttachments);
+                if (preview) preview.appendChild(attachmentRetry);
+                function setAttachmentsPending(pending) {
+                    form.dataset.destinationAttachmentsPending = String(pending);
+                    var send = form.querySelector('button[type="submit"]');
+                    if (send) send.disabled = pending || form.dataset.destinationModelsPending === 'true';
+                }
+                // This guard also covers task drafts that do not use Chat model preferences.
+                form.addEventListener('submit', function(event) {
+                    if (form.dataset.destinationAttachmentsPending === 'true') {
+                        event.preventDefault(); event.stopImmediatePropagation();
+                    }
+                }, true);
+                function addDestinationAttachments(files) {
+                    if (destinationAttachments.length + files.length > 3) { alert('Maximum 3 files allowed'); return; }
+                    for (var file of files) {
+                        if (file.size > (/\.(mp4|m4v|mov|webm|ogv)$/i.test(file.name) ? 200 : 25) * 1024 * 1024) {
+                            alert('File "' + file.name + '" exceeds the upload size limit'); return;
+                        }
+                    }
+                    files.forEach(function(file) {
+                        var attachment = {filename: file.name, size: file.size, media_type: file.type, file: file};
+                        destinationAttachments.push(attachment);
+                        appendPendingAttachmentRow(listContainer, attachment);
+                    });
+                    if (preview) preview.classList.remove('hidden');
+                    transferDestinationAttachments();
+                }
+                async function transferDestinationAttachments() {
+                    if (!destinationAttachments.length) return;
+                    var generation = ++attachmentUploadGeneration;
+                    if (destinationAttachmentController) destinationAttachmentController.abort();
+                    var controller = destinationAttachmentController = new AbortController();
+                    var entries = destinationAttachments.slice();
+                    var destination = chosenProject();
+                    setAttachmentsPending(true);
+                    attachmentRetry.hidden = true;
+                    // Never submit the previous server's session, even while a transfer fails.
+                    sessionInput.value = '';
+                    sessionInput.setAttribute('value', '');
+                    if (!destination) { openProjectPicker(); return; }
+                    try {
+                        var files = await Promise.all(entries.map(async function(entry) {
+                            if (entry.file) return entry.file;
+                            var source = '/chat/attachments/pending/' + encodeURIComponent(entry.session_id) + '/' + encodeURIComponent(entry.filename);
+                            var response = await fetch(source, {signal: controller.signal});
+                            if (!response.ok) throw new Error('Could not retrieve attachment');
+                            entry.file = new File([await response.blob()], entry.filename, {type: entry.media_type});
+                            return entry.file;
+                        }));
+                        if (generation !== attachmentUploadGeneration) return;
+                        var body = new FormData();
+                        files.forEach(function(file) { body.append('files', file); });
+                        var response = await fetch('/chat/attachments?project_id=' + encodeURIComponent(destination), {method: 'POST', body: body, signal: controller.signal});
+                        if (!response.ok) throw new Error('Could not upload attachments');
+                        var result = await response.json();
+                        if (generation !== attachmentUploadGeneration || !form.isConnected) return;
+                        destinationAttachments = result.attachments.map(function(attachment, index) {
+                            attachment.file = files[index];
+                            return attachment;
+                        });
+                        sessionInput.value = result.session_id;
+                        form.dataset.attachmentProject = destination;
+                        listContainer.innerHTML = '';
+                        destinationAttachments.forEach(function(attachment) { appendPendingAttachmentRow(listContainer, attachment); });
+                        window.saveChatPendingAttachmentState(form);
+                        setAttachmentsPending(false);
+                    } catch (error) {
+                        if (generation !== attachmentUploadGeneration || !form.isConnected) return;
+                        attachmentRetry.hidden = false;
+                    }
+                }
+
 				if (!window._chatPendingAttachmentHistoryBound) {
 					window._chatPendingAttachmentHistoryBound = true;
 					document.body.addEventListener('htmx:beforeHistorySave', function() {
@@ -3116,7 +3204,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
                 function setDestinationPending(pending) {
                     form.dataset.destinationModelsPending = String(pending);
                     var send = form.querySelector('[id$="-primary-action"] button[type="submit"]');
-                    if (send) send.disabled = pending;
+                    if (send) send.disabled = pending || form.dataset.destinationAttachmentsPending === 'true';
                 }
                 async function refreshProjectModels() {
                     var token = ++modelRequest;
@@ -3152,12 +3240,13 @@ templ ChatInputForm(config ChatInputFormConfig) {
                         }
                     }
                 }
-				var uploadedForProject = projectInput.value;
+				var uploadedForProject = form.dataset.attachmentProject || projectInput.value;
+                if (uploadedForProject !== projectInput.value) transferDestinationAttachments();
 				projectInput.addEventListener('change', function() {
 					syncProjectLabel();
                     if (projectSelect.getAttribute('data-project-send-url')) refreshProjectModels();
-					// Uploaded files are staged on the previous project's server.
-					if (uploadedForProject !== projectInput.value && window[clearFuncName]) window[clearFuncName]();
+					// Re-stage attachments on the new owner without discarding the draft.
+                    if (uploadedForProject !== projectInput.value) transferDestinationAttachments();
 					uploadedForProject = projectInput.value;
 				});
 				projectSelect.addEventListener('chat-select-change', function(e) {
@@ -3173,7 +3262,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 				}).observe(projectSelect, {attributes: true, attributeFilter: ['aria-expanded']});
 				form.addEventListener('htmx:configRequest', function(event) {
 					if (event.detail.elt !== form || event.detail.path !== normalPostEndpoint) return;
-                    if (form.dataset.destinationModelsPending === 'true') { event.preventDefault(); return; }
+                    if ((form.dataset.destinationModelsPending === 'true' || form.dataset.destinationAttachmentsPending === 'true')) { event.preventDefault(); return; }
 					if (!chosenProject()) {
 						event.preventDefault();
 						openProjectPicker();
@@ -3254,6 +3343,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 
 				function handleFiles(files) {
 					if (files.length === 0) return;
+                    if (projectSelect) { addDestinationAttachments(files); return; }
 					var filesToUpload = files.slice();
 					var uploadGeneration = attachmentUploadGeneration;
 					attachmentUploadQueue = attachmentUploadQueue.then(function() {
