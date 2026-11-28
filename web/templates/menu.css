@@ -1,3 +1,7 @@
+/* Hidden controls must not be exposed by flex/grid display utilities. */
+[data-composer-options] > [hidden],
+.inspector-property-row[hidden] { display: none !important; }
+
 /* Focus never opens a popup. Explicit lifecycle state is authoritative. */
 .dropdown:not([data-kanban-menu-key]):not([data-menu-open="true"]):not(.dropdown-open) > .dropdown-content:not([popover]) {
   visibility: hidden !important; opacity: 0 !important; pointer-events: none !important;

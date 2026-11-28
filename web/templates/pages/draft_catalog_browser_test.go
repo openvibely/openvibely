@@ -67,6 +67,12 @@ func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 			}
 			runComposerFocusCDP(t, chrome, server.URL+path+"?project_id="+projects[initial].ID, "draft-catalog", func(b *composerFocusCDP) {
 				b.waitFor("composer ready", `String(!!document.querySelector('[data-project-input]'))`, "true")
+				b.waitFor("single-server picker hidden", `String(document.querySelector('[data-project-input]').getClientRects().length === 0)`, "true")
+				if !chat {
+					b.click("#task-details-opener")
+					b.waitFor("Details panel open", `document.getElementById('task-details-opener').getAttribute('aria-expanded')`, "true")
+					b.waitFor("single-server Details row hidden", `String(document.querySelector('[data-detail-property="destination_project"]').getClientRects().length === 0)`, "true")
+				}
 				if scenario.remembered {
 					b.evaluate(`localStorage.setItem("ov.composer.destination.__repo_1234567890abcdef","r-1234567890abcdef-remote-one");"saved"`)
 				}
@@ -75,6 +81,10 @@ func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 				}
 				b.evaluate(`window.dispatchEvent(new Event('openvibely-servers-changed'));'sent'`)
 				b.waitFor("picker updated", `String(document.querySelector('[data-project-input]').dataset.destinationScope==='__repo_1234567890abcdef' && !document.querySelector('[data-project-input]').parentElement.hidden)`, "true")
+				b.waitFor("shared picker visible", `String(document.querySelector('[data-project-input]').getClientRects().length > 0)`, "true")
+				if !chat {
+					b.waitFor("shared Details row visible", `String(document.querySelector('[data-detail-property="destination_project"]').getClientRects().length > 0)`, "true")
+				}
 				expected := projects[0].ID
 				if scenario.remembered {
 					expected = projects[1].ID
