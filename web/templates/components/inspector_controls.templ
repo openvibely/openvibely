@@ -89,6 +89,14 @@ templ InspectorPickerScript() {
   function options(){return Array.from(picker.querySelectorAll('[data-options]:not([hidden]) button[data-value]:not([hidden])')).filter(function(b){return !b.disabled;});}
   function highlight(option){if(active===option&&(!option||option.hasAttribute('data-active')))return;active=option;picker.querySelectorAll('button[data-value]').forEach(function(b){b.toggleAttribute('data-active',b===option);});}
   if(!nativePopover)picker.removeAttribute('popover');
+  // Own vertical wheel scrolling for top-layer pickers, including WebKit.
+  var list=picker.querySelector('.ov-menu-scroll');
+  list.addEventListener('wheel',function(e){
+   if(e.ctrlKey||e.metaKey||!e.deltaY||Math.abs(e.deltaX)>Math.abs(e.deltaY))return;
+   var unit=e.deltaMode===1?16:e.deltaMode===2?list.clientHeight:1;
+   list.scrollTop+=e.deltaY*unit;
+   e.preventDefault();
+  },{passive:false,signal:abort.signal});
   var menus=new WeakMap();
   function menu(row){var controller=menus.get(row);if(!controller){controller=window.ovMenuController.create({trigger:row,panels:[picker],isOpen:function(){return current===row&&isOpen();},open:function(){show(row);},close:hide,restoreFocus:returnFocus});menus.set(row,controller);}return controller;}
   function open(row){menu(row).toggle();}

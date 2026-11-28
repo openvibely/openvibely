@@ -201,6 +201,11 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.click(`[data-detail-property="agent_id"]`)
 		b.waitFor("model picker open", `String(document.getElementById('task-property-picker').matches(':popover-open'))`, "true")
 		b.waitFor("default selected in picker", `document.querySelector('#task-property-picker [data-active]').dataset.value`, "default")
+		b.evaluate(`(()=>{const group=document.querySelector('#task-property-picker [data-options="agent_id"]');for(let i=0;i<30;i++){const option=document.createElement('button');option.className='ov-menu-option w-full';option.dataset.value='scroll-test-'+i;option.dataset.scrollTest='';option.textContent='Extra model '+i;group.appendChild(option);}return 'ready';})()`)
+		b.wheel("#task-property-picker .ov-menu-scroll", 180)
+		b.waitFor("model menu wheel scrolls", `String(document.querySelector('#task-property-picker .ov-menu-scroll').scrollTop>0)`, "true")
+		b.evaluate(`(()=>{const list=document.querySelector('#task-property-picker .ov-menu-scroll');list.scrollTop=0;const event=new WheelEvent('wheel',{deltaY:-100,bubbles:true,cancelable:true});list.dispatchEvent(event);if(!event.defaultPrevented||list.scrollTop!==0)throw Error('wheel escaped menu boundary');document.querySelectorAll('[data-scroll-test]').forEach(option=>option.remove());return 'clean';})()`)
+
 		b.clickMenuBackdrop(`[data-detail-property="agent_id"]`)
 		b.waitFor("same row closes model picker", `String(document.getElementById('task-property-picker').matches(':popover-open'))`, "false")
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "a"}, nil)
