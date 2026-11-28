@@ -1072,7 +1072,18 @@ func TestSlackService_SocketEventDeadlineCleanupDoesNotBlockAndRemovesProvisiona
 		tasks, err := taskRepo.ListByProject(context.Background(), projectID, "")
 		return err == nil && len(tasks) == 0
 	}, 5*time.Second, 10*time.Millisecond, "detached compensation must remove the provisional task")
-
+	// Deletion becomes visible before compensation releases event admission.
+	// Wait for both steps before testing successful redelivery.
+	require.Eventually(t, func() bool {
+		svc.mu.Lock()
+		defer svc.mu.Unlock()
+		key := slackIncomingEventKey("T1", "D1", "1710000000.100000", "U1")
+		_, cleaning := svc.cleanupMessageEvents[key]
+		_, processing := svc.processingMessageEvents[key]
+		return !cleaning && !processing
+	}, 5*time.Second, 10*time.Millisecond, "compensation must release retry admission")
+	// The short deadline above exercises cancellation, not normal persistence.
+	svc.preACKTimeout = slackPreACKTimeout
 	svc.handleSocketEvent(context.Background(), nil, slackSocketMessageEvent("E1-retry", "1710000000.100000"))
 	require.Equal(t, 1, acks)
 	require.Equal(t, 2, attempts)
