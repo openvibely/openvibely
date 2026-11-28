@@ -53,6 +53,7 @@ func (h *Handler) Chat(c echo.Context) error {
 	limit := parseThreadWindowLimit(c.QueryParam("limit"), chatUIWindowLimitDefault, chatUIWindowLimitMax)
 	beforeExecID := strings.TrimSpace(c.QueryParam("before"))
 	chatHistory, hasEarlier, err := h.loadChatExecutionWindow(c.Request().Context(), currentProjectID, beforeExecID, limit)
+	historyLoaded := err == nil
 	if err != nil {
 		applog.Infof("[handler] Chat error loading chat history: %v", err)
 		// Continue even if history load fails - just show empty chat
@@ -76,10 +77,12 @@ func (h *Handler) Chat(c echo.Context) error {
 	chatAttachmentsByExec := h.loadChatAttachmentsForExecutions(c.Request().Context(), chatHistory, "Chat")
 
 	pendingInputs := []models.ThreadInput{}
+	pendingLoaded := true
 	if h.threadInputRepo != nil && currentProjectID != "" {
 		if inputs, inputErr := h.threadInputRepo.ListPendingForChat(c.Request().Context(), currentProjectID); inputErr == nil {
 			pendingInputs = inputs
 		} else {
+			pendingLoaded = false
 			applog.Infof("[handler] Chat error loading pending inputs: %v", inputErr)
 		}
 	}
@@ -101,6 +104,27 @@ func (h *Handler) Chat(c echo.Context) error {
 			return echo.NewHTTPError(http.StatusServiceUnavailable, "Unable to refresh Chat questions. Try again.")
 		}
 		inputRequests = nil
+	}
+
+	// Empty desktop Chat is a destination-aware draft, even before remote
+	// repository identities arrive. Existing conversations never enter this path.
+	if h.desktopMode && historyLoaded && pendingLoaded && !hasEarlier && len(chatHistory) == 0 && len(pendingInputs) == 0 && len(inputRequests) == 0 && err == nil {
+		project, projectErr := h.projectSvc.GetByID(c.Request().Context(), currentProjectID)
+		if projectErr == nil && project != nil {
+			for _, group := range h.sharedProjects(c.Request().Context(), h.remoteServerGroups(c.Request().Context())) {
+				for _, member := range group.Members {
+					if member.ID == currentProjectID {
+						return h.sharedProjectChat(c, &group)
+					}
+				}
+			}
+			choices := []models.Project{*project}
+			if isHTMX {
+				return render(c, http.StatusOK, pages.SharedChatContent(agents, currentProjectID, choices))
+			}
+			projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
+			return render(c, http.StatusOK, pages.SharedChat(projects, currentProjectID, agents, choices))
+		}
 	}
 
 	// For HTMX requests, return just the chat content

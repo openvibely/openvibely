@@ -1618,7 +1618,7 @@ templ SharedChatContent(agents []models.LLMConfig, sharedID string, choices []mo
 		<div id="shared-chat-messages" class="relative flex-1 min-h-0 min-w-0">
 			@components.ChatEmptyStage("Choose which computer's copy to chat in, then send a message")
 		</div>
-		<input type="hidden" id="shared-chat-project" value=""/>
+		<input type="hidden" id="shared-chat-project" value={ newTaskDestinationValue(&models.Project{ID:sharedID}) }/>
 		@components.ChatInputForm(components.ChatInputFormConfig{
 			FormID:            "shared-chat-form",
 			InputID:           "shared-chat-input",

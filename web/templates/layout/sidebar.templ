@@ -520,6 +520,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
                         try { window.openVibelySharedProjectMachines = JSON.parse(doc.getElementById('project-catalog-shared-machines').textContent || '{}') || {}; } catch (_) {}
                         if (window.openVibelyProjectTabsRender) window.openVibelyProjectTabsRender();
                         syncProjectSelector();
+                        window.dispatchEvent(new Event('openvibely-project-catalog-updated'));
                         const target = window.openVibelyProjectPage(window.openVibelyProjectTab(current));
                         if (target === current || !Array.from(sel.options).some(function(option) { return option.value === target; })) return;
                         // Navigation scope is independent of the mounted page's owner.

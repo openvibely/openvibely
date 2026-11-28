@@ -1706,7 +1706,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 			<div class="flex items-center justify-between gap-2 pt-2 min-w-0 max-w-full overflow-hidden">
 				<div data-composer-options class="flex items-center gap-1 min-w-0 flex-1">
 					if len(config.ProjectChoices) > 0 {
-						<div class="relative inline-flex min-w-0">
+						<div class="relative inline-flex min-w-0" hidden?={ !models.IsAggregateProject(config.DestinationScope) }>
 							<button
 								type="button"
 								id={ config.FormID + "-project-select" }
@@ -2514,7 +2514,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 							form.dispatchEvent(submitEvent);
 						}
 							function submitComposer(endpoint, intent, payload) {
-								if (!endpoint || (form.dataset.destinationModelsPending === 'true' || form.dataset.destinationAttachmentsPending === 'true')) return;
+								if (!endpoint || (form.dataset.destinationCatalogPending === 'true' || form.dataset.destinationModelsPending === 'true' || form.dataset.destinationAttachmentsPending === 'true')) return;
 								var submittedMessage = payload && typeof payload.message === 'string' ? payload.message : composerMessage();
 								if (submittedMessage.trim() === '') return;
 								if (intent === 'steer' && typeof htmx !== 'undefined') {
@@ -2966,7 +2966,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
                 function setAttachmentsPending(pending) {
                     form.dataset.destinationAttachmentsPending = String(pending);
                     var send = form.querySelector('button[type="submit"]');
-                    if (send) send.disabled = pending || form.dataset.destinationModelsPending === 'true';
+                    if (send) send.disabled = pending || form.dataset.destinationModelsPending === 'true' || form.dataset.destinationCatalogPending === 'true';
                 }
                 // This guard also covers task drafts that do not use Chat model preferences.
                 form.addEventListener('submit', function(event) {
@@ -3209,7 +3209,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
                 function setDestinationPending(pending) {
                     form.dataset.destinationModelsPending = String(pending);
                     var send = form.querySelector('[id$="-primary-action"] button[type="submit"]');
-                    if (send) send.disabled = pending || form.dataset.destinationAttachmentsPending === 'true';
+                    if (send) send.disabled = pending || form.dataset.destinationAttachmentsPending === 'true' || form.dataset.destinationCatalogPending === 'true';
                 }
                 async function refreshProjectModels() {
                     var token = ++modelRequest;
@@ -3280,13 +3280,95 @@ templ ChatInputForm(config ChatInputFormConfig) {
                     projectInput.value = destination;
                     projectInput.dispatchEvent(new Event('change', {bubbles: true}));
                 });
+
+                // Catalog updates change draft choices, never an existing conversation's owner.
+                var catalogRequest = 0;
+                function setCatalogPending(pending) {
+                    form.dataset.destinationCatalogPending = String(pending);
+                    var send = form.querySelector('[id$="-primary-action"] button[type="submit"]');
+                    if (send) send.disabled = pending || form.dataset.destinationModelsPending === 'true' || form.dataset.destinationAttachmentsPending === 'true';
+                }
+                var explicitDestination = false;
+                projectSelect.addEventListener('chat-select-change', function() { explicitDestination = true; });
+                form.querySelector('[id$="-agent-select"]')?.addEventListener('chat-select-change', function() { explicitDestination = true; });
+                form.closest('#task-detail-content')?.querySelector('#task-property-picker')?.addEventListener('click', function(event) {
+                    if (event.target.closest('[data-options="destination_project"] button[data-value]')) explicitDestination = true;
+                }, true);
+                async function updateDraftDestinations() {
+                    if (!form.isConnected) return;
+                    var currentScope = projectSelect.dataset.destinationScope;
+                    var scope = window.openVibelyProjectPage?.(window.openVibelyProjectTab?.(currentScope) || currentScope) || currentScope;
+                    if (!scope || scope === '__all_projects__' || !window.openVibelySharedProjectMachines?.[scope]) return;
+                    var token = ++catalogRequest;
+                    setCatalogPending(true);
+                    try {
+                        var response = await fetch('/tasks/new?project_id=' + encodeURIComponent(scope), {headers: {'HX-Request':'true'}});
+                        if (!response.ok) throw new Error('Destinations unavailable');
+                        var doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+                        if (token !== catalogRequest || !form.isConnected) return;
+                        var source = doc.querySelector('#task-thread-form-project-select');
+                        if (!source) return;
+                        var options = projectSelect.parentElement.querySelector('.chat-custom-select-options');
+                        options.innerHTML = source.parentElement.querySelector('.chat-custom-select-options').innerHTML;
+                        projectSelect.parentElement.hidden = false;
+                        ['placeholder','defaultDestination','localEnabled'].forEach(function(key) { projectSelect.dataset[key] = source.dataset[key]; });
+                        projectSelect.dataset.destinationScope = scope;
+                        destinationStorageKey = 'ov.composer.destination.' + scope;
+                        projectSelect.setAttribute('aria-label', source.getAttribute('aria-label'));
+                        var root = form.closest('#task-detail-content');
+                        if (root) {
+                            var row = root.querySelector('[data-detail-property="destination_project"]');
+                            var sourceRow = doc.querySelector('[data-detail-property="destination_project"]');
+                            row.hidden = false;
+                            row.dataset.placeholder = sourceRow.dataset.placeholder;
+                            // Keep the input and its listeners; only update the row's caption.
+                            var caption = row.querySelector('span');
+                            if (caption) caption.textContent = 'Server:';
+                            var detailOptions = root.querySelector('[data-options="destination_project"]');
+                            detailOptions.innerHTML = doc.querySelector('[data-options="destination_project"]').innerHTML;
+                            var endpoint = new URL(normalPostEndpoint, location.href);
+                            endpoint.searchParams.set('project_id', scope);
+                            endpoint.searchParams.delete('destination_project');
+                            normalPostEndpoint = endpoint.pathname + endpoint.search;
+                            form.setAttribute('hx-post', normalPostEndpoint);
+                            htmx.process(form);
+                        }
+                        var hasDraft = explicitDestination || !['', 'auto', 'default'].includes(form.querySelector('[name="agent_id"]')?.value || '') || !!form.querySelector('textarea[name="message"]')?.value.trim() || !!form.querySelector('[data-pending-attachment]') || !!root?.querySelector('input[name="title"]')?.value.trim();
+                        var next = projectInput.value;
+                        if (!hasDraft && scope !== currentScope) {
+                            var saved = '';
+                            try { saved = localStorage.getItem(destinationStorageKey) || ''; } catch (_) {}
+                            next = usableDestination(saved) ? saved : source.dataset.defaultDestination || '';
+                        }
+                        if (next !== projectInput.value) {
+                            projectInput.value = next;
+                            projectInput.dispatchEvent(new Event('change', {bubbles:true}));
+                        } else {
+                            syncProjectLabel();
+                            if (root) {
+                                var selected = Array.from(options.children).find(function(item) { return item.dataset.value === next; });
+                                root.querySelector('[data-detail-property="destination_project"] [data-property-label]').textContent = selected ? selected.textContent.trim() : source.dataset.placeholder;
+                            }
+                        }
+                    } catch (_) { /* Keep the current draft and owner when catalog refresh fails. */ }
+                    finally { if (token === catalogRequest && form.isConnected) setCatalogPending(false); }
+                }
+                window.addEventListener('openvibely-project-catalog-updated', updateDraftDestinations);
+                var catalogObserver = new MutationObserver(function() {
+                    if (form.isConnected) return;
+                    window.removeEventListener('openvibely-project-catalog-updated', updateDraftDestinations);
+                    catalogObserver.disconnect();
+                    ++catalogRequest;
+                });
+                catalogObserver.observe(document.body, {childList:true, subtree:true});
+                setTimeout(updateDraftDestinations);
 				// Closing the picker without a choice cancels the waiting Send, not the draft.
 				new MutationObserver(function() {
 					if (projectSelect.getAttribute('aria-expanded') === 'false') projectSendPending = false;
 				}).observe(projectSelect, {attributes: true, attributeFilter: ['aria-expanded']});
 				form.addEventListener('htmx:configRequest', function(event) {
 					if (event.detail.elt !== form || event.detail.path !== normalPostEndpoint) return;
-                    if ((form.dataset.destinationModelsPending === 'true' || form.dataset.destinationAttachmentsPending === 'true')) { event.preventDefault(); return; }
+                    if ((form.dataset.destinationCatalogPending === 'true' || form.dataset.destinationModelsPending === 'true' || form.dataset.destinationAttachmentsPending === 'true')) { event.preventDefault(); return; }
 					if (!chosenProject()) {
 						event.preventDefault();
 						openProjectPicker();

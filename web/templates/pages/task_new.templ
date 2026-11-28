@@ -162,6 +162,10 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      }
      async function refreshDestinationModels() {
       var token = ++modelRequest;
+      var form = root.querySelector('#task-thread-form');
+      form.dataset.destinationModelsPending = 'true';
+      var send = form.querySelector('[id$="-primary-action"] button[type="submit"]');
+      if (send) send.disabled = true;
       var picker = root.querySelector('#task-thread-form-agent-select');
       var input = root.querySelector('#task-thread-form-agent-id');
       if (!picker || !input) return;
@@ -185,6 +189,8 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
        picker.disabled = false;
        window._setChatCustomSelectValue?.(picker, 'default');
        window.ovModelPicker?.changed(picker);
+       form.dataset.destinationModelsPending = 'false';
+       if (send) send.disabled = form.dataset.destinationAttachmentsPending === 'true' || form.dataset.destinationCatalogPending === 'true';
       } catch (_) {
        if (token !== modelRequest || !root.isConnected) return;
        picker.querySelector('.chat-custom-select-label').textContent = 'Models unavailable';
@@ -575,16 +581,14 @@ func projectDefaultAgentID(project *models.Project) string {
 
 // Project selection uses the same compact row as the other Task properties.
 templ NewTaskProjectRow(project *models.Project, projects []models.Project) {
- if models.IsAggregateProject(layout.WorkspaceProjectID(ctx, project.ID)) {
-  <button type="button" class="task-property-row inspector-property-row" data-detail-property="destination_project" data-value={ newTaskDestinationValue(project) } aria-haspopup="dialog" data-placeholder={ components.ComposerDestinationPrompt(models.IsSharedProjectID(layout.WorkspaceProjectID(ctx, project.ID))) }>
+  <button hidden?={ !models.IsAggregateProject(layout.WorkspaceProjectID(ctx, project.ID)) } type="button" class="task-property-row inspector-property-row" data-detail-property="destination_project" data-value={ newTaskDestinationValue(project) } aria-haspopup="dialog" data-placeholder={ components.ComposerDestinationPrompt(models.IsSharedProjectID(layout.WorkspaceProjectID(ctx, project.ID))) }>
    @components.InspectorPropertyContent(newTaskDestinationProperty(ctx, project), newTaskDestinationLabel(ctx, project))
    <input type="hidden" id="new-task-project" name="destination_project" form="task-thread-form" data-draft-property="destination_project" value={ newTaskDestinationValue(project) }/>
   </button>
- }
 }
 
 func newTaskProjectChoices(ctx context.Context, project *models.Project) []models.Project {
- if !models.IsAggregateProject(layout.WorkspaceProjectID(ctx, project.ID)) { return nil }
+ if !models.IsAggregateProject(layout.WorkspaceProjectID(ctx, project.ID)) { return []models.Project{*project} }
  return templateui.ProjectOptions(ctx)
 }
 
