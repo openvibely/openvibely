@@ -15,9 +15,9 @@ import (
 
 func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	for _, scenario := range []struct{ chat, remote, dirty, remembered bool }{{false, false, true, false}, {true, false, true, false}, {false, true, false, false}, {true, true, false, false}, {false, true, true, false}, {true, true, true, false}, {false, false, false, true}, {true, false, false, true}} {
+	for _, scenario := range []struct{ chat, remote, dirty, remembered, pending bool }{{false, false, true, false, false}, {true, false, true, false, false}, {false, true, false, false, false}, {true, true, false, false, false}, {false, true, true, false, false}, {true, true, true, false, false}, {false, false, false, true, false}, {true, false, false, true, false}, {true, false, true, false, true}} {
 		chat := scenario.chat
-		t.Run(fmt.Sprint("chat=", chat, "/remote=", scenario.remote, "/dirty=", scenario.dirty, "/remembered=", scenario.remembered), func(t *testing.T) {
+		t.Run(fmt.Sprint("chat=", chat, "/remote=", scenario.remote, "/dirty=", scenario.dirty, "/remembered=", scenario.remembered, "/pending=", scenario.pending), func(t *testing.T) {
 			projects := []models.Project{{ID: "local-one", Name: "Foo"}, {ID: "r-1234567890abcdef-remote-one", Name: "Foo"}}
 			initial := 0
 			if scenario.remote {
@@ -86,6 +86,12 @@ func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 				attachmentCase := chat && !scenario.remote && scenario.dirty
 				if attachmentCase {
 					b.evaluate(`var f=document.getElementById('shared-chat-form');var k=f.dataset.attachmentStateKey;sessionStorage.setItem(k,JSON.stringify({sessionID:'draft-upload',projectID:'local-one',attachments:[{filename:'screenshot.png',size:12,media_type:'image/png',session_id:'draft-upload'}]}));window.restoreChatPendingAttachmentState(f);'attached'`)
+				}
+				if scenario.pending {
+					b.evaluate(`var f=document.getElementById('shared-chat-form');var realFetch=window.fetch;window.fetch=function(url,options){if(String(url).startsWith('/chat/attachments?'))return new Promise(function(){});return realFetch(url,options)};var dt=new DataTransfer();dt.items.add(new File(['new file'],'second.txt',{type:'text/plain'}));var fi=f.querySelector('input[type=file]');fi.files=dt.files;fi.dispatchEvent(new Event('change'));'attached'`)
+				}
+				if scenario.pending {
+					b.waitFor("upload pending before regrouping", `String(document.getElementById('shared-chat-form').dataset.destinationAttachmentsPending === 'true' && document.querySelector('#shared-chat-form [name="attachment_session_id"]').value === '')`, "true")
 				}
 				b.evaluate(`window.dispatchEvent(new Event('openvibely-servers-changed'));'sent'`)
 				b.waitFor("picker updated", `String(document.querySelector('[data-project-input]').dataset.destinationScope==='__repo_1234567890abcdef' && !document.querySelector('[data-project-input]').parentElement.hidden)`, "true")

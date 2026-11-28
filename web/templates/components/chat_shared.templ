@@ -3319,17 +3319,30 @@ templ ChatInputForm(config ChatInputFormConfig) {
                             var oldPasteKey = pasteKey;
                             attachmentStateKey = 'openvibely-page-attachments-shared-chat-' + scope;
                             form.setAttribute('data-attachment-state-key', attachmentStateKey);
-                            window.saveChatPendingAttachmentState(form);
+                            // An in-flight upload clears the form's submit session. Keep the
+                            // last completed upload as the recoverable draft until it finishes.
+                            var savedAttachments = readPendingAttachmentState(form) || window._chatPendingAttachmentStates[oldAttachmentKey];
+                            if (!savedAttachments) {
+                                try { savedAttachments = JSON.parse(sessionStorage.getItem(oldAttachmentKey) || 'null'); } catch (_) {}
+                            }
+                            var attachmentsStored = false;
+                            if (savedAttachments && savedAttachments.sessionID) {
+                                window._chatPendingAttachmentStates[attachmentStateKey] = savedAttachments;
+                                try {
+                                    sessionStorage.setItem(attachmentStateKey, JSON.stringify(savedAttachments));
+                                    attachmentsStored = true;
+                                } catch (_) {}
+                            }
                             pasteScope = attachmentStateKey;
                             pasteKey = pasteScope + '-pasted-text';
                             savePastes();
                             if (oldAttachmentKey && oldAttachmentKey !== attachmentStateKey) {
-                                delete window._chatPendingAttachmentStates[oldAttachmentKey];
+                                if (attachmentsStored) {
+                                    delete window._chatPendingAttachmentStates[oldAttachmentKey];
+                                    try { sessionStorage.removeItem(oldAttachmentKey); } catch (_) {}
+                                }
                                 delete window._ovPasteDrafts[oldPasteKey];
-                                try {
-                                    sessionStorage.removeItem(oldAttachmentKey);
-                                    sessionStorage.removeItem(oldPasteKey);
-                                } catch (_) {}
+                                try { sessionStorage.removeItem(oldPasteKey); } catch (_) {}
                             }
                         }
                         projectSelect.dataset.destinationScope = scope;
