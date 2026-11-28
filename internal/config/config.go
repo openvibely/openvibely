@@ -239,7 +239,6 @@ func defaultsForMode(mode RuntimeMode) modeDefaults {
 	}
 	if mode == ModeDesktop {
 		appDataDir = desktopDataDir()
-		defaults.Port = "0"
 		defaults.EnableLocalRepoPath = true
 	}
 	defaults.AppDataDir = appDataDir

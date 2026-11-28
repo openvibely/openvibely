@@ -9,7 +9,7 @@ Set environment variables directly or place them in `.env` (loaded by `start.sh`
 | Variable | Purpose | Allowed values | Default behavior (from code) | Examples (local / VPS-public) |
 |---|---|---|---|---|
 | `OPENVIBELY_NO_BROWSER` | Disable automatic browser opening by the server executable | `true`, `false` (Go boolean forms also accepted) | Unset/false opens the local `/chat` page after readiness, including via `start.sh`. Both Docker images set `true`; update relaunches force `true`. Desktop startup is unaffected. | `false` \| `true` |
-| `PORT` | HTTP listen port | Any valid TCP port string | `3001` (`internal/config/config.go`; Docker image overrides to `3001`; desktop uses `0` for ephemeral) | `3001` \| `8080` |
+| `PORT` | HTTP listen port | Any valid TCP port string | `3001` (`internal/config/config.go`; Docker image overrides to `3001`; desktop also defaults to `3001`) | `3001` \| `8080` |
 | `OPENVIBELY_APP_DATA_DIR` | Overrides the external app-data root shared by the database, managed repos, global agents, skills, and plugin storage | Filesystem path (absolute recommended) | Server: `~/.openvibely`. Desktop: macOS `~/Library/Application Support/OpenVibely`, Windows `%LOCALAPPDATA%\OpenVibely`, Linux `$XDG_DATA_HOME/openvibely`. Docker: `/data`. Desktop storage must remain outside the replaceable application bundle. | `~/.openvibely` \| `/data` |
 | `OPENVIBELY_RUNTIME_DIR` | **Deprecated** `start.sh`-only alias for `OPENVIBELY_APP_DATA_DIR`. If `OPENVIBELY_APP_DATA_DIR` is unset and this is set, `start.sh` copies its value into `OPENVIBELY_APP_DATA_DIR`. Has no effect when the binary is launched directly. | Filesystem path | Unset; prefer `OPENVIBELY_APP_DATA_DIR` in all new configurations | deprecated \| — |
 | `DATABASE_DRIVER` | Persistence backend used at startup. Unsupported values fail startup. | `sqlite` | `sqlite` | `sqlite` |
@@ -268,7 +268,7 @@ OAUTH_REDIRECT_MODE=auto
 ## OAuth by Mode
 
 - **Server mode (VPS)**: Set `APP_BASE_URL` to your public origin. OAuth callbacks route to your hostname.
-- **Desktop mode**: OAuth defaults to localhost callback flow. `APP_BASE_URL` is typically unset; the backend binds to `127.0.0.1` with an ephemeral port and OAuth providers redirect back to localhost.
+- **Desktop mode**: OAuth defaults to localhost callback flow. `APP_BASE_URL` is typically unset; the WebView uses localhost on port `3001` by default (override with `PORT`) and OAuth providers redirect back to localhost.
 - **Troubleshooting**: If a provider rejects localhost callbacks, set `OAUTH_REDIRECT_MODE=localhost_manual` and paste the callback URL manually.
 
 ## Organization Accounts

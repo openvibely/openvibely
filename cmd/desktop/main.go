@@ -1,5 +1,5 @@
 // Command desktop launches OpenVibely as a Wails desktop application.
-// It starts the shared Go backend on a localhost ephemeral port and loads
+// It starts the shared Go backend on port 3001 by default (overridable with PORT) and loads
 // the UI in a native WebView window.
 package main
 

@@ -170,8 +170,8 @@ func TestLoadWithMode_DesktopDefaults(t *testing.T) {
 	if cfg.Mode != ModeDesktop {
 		t.Fatalf("expected mode desktop, got %s", cfg.Mode)
 	}
-	if cfg.Port != "0" {
-		t.Fatalf("expected desktop default port 0 (ephemeral), got %s", cfg.Port)
+	if cfg.Port != "3001" {
+		t.Fatalf("expected desktop default port 3001, got %s", cfg.Port)
 	}
 
 	if cfg.AppDataDir == "" {

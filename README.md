@@ -204,7 +204,7 @@ web/templates/
 The `internal/server` package provides `Start(ctx, cfg) → (*Instance, error)` which wires the full backend (DB, repos, services, HTTP routes, workers, scheduler) and returns a running instance with its bound address and a shutdown handle.
 
 - `cmd/server` uses `config.Load()` (server mode) and waits for OS signals.
-- `cmd/desktop` uses `config.LoadWithMode(ModeDesktop)` which defaults to OS app-data directories for the DB, repos, and uploads, and binds to an ephemeral port. The Wails WebView loads the backend URL.
+- `cmd/desktop` uses `config.LoadWithMode(ModeDesktop)` which defaults to OS app-data directories for the DB, repos, and uploads, and defaults to port 3001 (override with `PORT`). The Wails WebView loads the backend URL.
 
 Both modes share 100% of the backend code; no forking.
 
@@ -241,7 +241,7 @@ Desktop mode defaults:
 
 | Setting | Desktop default | Env override |
 |---|---|---|
-| Port | `0` (ephemeral) | `PORT` |
+| Port | `3001` | `PORT` |
 | DB path | Platform app-data directory (`~/Library/Application Support/OpenVibely` on macOS, `%LOCALAPPDATA%\OpenVibely` on Windows, `$XDG_DATA_HOME/openvibely` on Linux) | `DATABASE_PATH` or `OPENVIBELY_APP_DATA_DIR` |
 | Repo root | `<platform app-data directory>/repos` | `PROJECT_REPO_ROOT` or `OPENVIBELY_APP_DATA_DIR` |
 | Local repo paths | enabled | `OPENVIBELY_ENABLE_LOCAL_REPO_PATH` |
@@ -269,7 +269,7 @@ The image runs as UID/GID `10001:10001`, so mounted `/data` storage must be writ
 ## OAuth by Mode
 
 - **Server mode (VPS)**: Set `APP_BASE_URL` to your public origin. OAuth callbacks route to your hostname.
-- **Desktop mode**: OAuth defaults to localhost callback flow. `APP_BASE_URL` is typically unset; the backend binds to `127.0.0.1` with an ephemeral port and OAuth providers redirect back to localhost.
+- **Desktop mode**: OAuth defaults to localhost callback flow. `APP_BASE_URL` is typically unset; the WebView uses localhost on port `3001` by default (override with `PORT`) and OAuth providers redirect back to localhost.
 - **Troubleshooting**: If provider rejects localhost callbacks, set `OAUTH_REDIRECT_MODE=localhost_manual` and paste the callback URL manually.
 
 ## Development
