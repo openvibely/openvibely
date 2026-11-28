@@ -372,8 +372,14 @@ func drainPackagedAppJob(job windows.Handle, deadline time.Time) error {
 			uintptr(unsafe.Pointer(&members)), uint32(unsafe.Sizeof(members)), nil); err != nil {
 			return fmt.Errorf("query app job members: %w", err)
 		}
-		if members.count < members.assigned || members.count > uint32(len(members.pids)) {
-			return fmt.Errorf("app job member list incomplete: %d of %d", members.count, members.assigned)
+		if members.assigned > uint32(len(members.pids)) || members.count > uint32(len(members.pids)) {
+			return fmt.Errorf("app job member list exceeds capacity: %d of %d", members.count, members.assigned)
+		}
+		if members.count < members.assigned {
+			// An exit during enumeration can leave a short list even when
+			// the buffer has room. Require a complete snapshot before draining.
+			time.Sleep(10 * time.Millisecond)
+			continue
 		}
 		for _, id := range members.pids[:members.count] {
 			pid := uint32(id)
