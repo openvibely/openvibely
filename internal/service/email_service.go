@@ -23,6 +23,7 @@ import (
 
 	"github.com/emersion/go-imap"
 	imapclient "github.com/emersion/go-imap/client"
+	_ "github.com/emersion/go-message/charset" // registers decoders for common non-UTF-8 charsets
 	messagemail "github.com/emersion/go-message/mail"
 	"github.com/openvibely/openvibely/internal/applog"
 	"github.com/openvibely/openvibely/internal/chatcontrol"
@@ -1133,7 +1134,10 @@ func parseIMAPMessage(msg *imap.Message, section *imap.BodySectionName, skipAtta
 			inbound.AutoSubmitted = h.Get("Auto-Submitted")
 			inbound.Precedence = h.Get("Precedence")
 			inbound.ListUnsub = h.Get("List-Unsubscribe")
-			inbound.Body, inbound.Attachments = readEmailParts(mr, skipAttachments)
+			inbound.Body, inbound.Attachments, err = readEmailPartsWithError(mr, skipAttachments)
+			if err != nil {
+				return inbound, fmt.Errorf("read email parts: %w", err)
+			}
 		} else {
 			raw, _ := io.ReadAll(body)
 			inbound.Body = string(raw)
@@ -1152,6 +1156,15 @@ func parseIMAPMessage(msg *imap.Message, section *imap.BodySectionName, skipAtta
 // also treated as attachments. When skipAttachments is true, attachment parts
 // are read past and discarded so behavior matches the legacy text-only path.
 func readEmailParts(mr *messagemail.Reader, skipAttachments bool) (string, []EmailInboundAttachment) {
+	body, attachments, _ := readEmailPartsWithError(mr, skipAttachments)
+	return body, attachments
+}
+
+// readEmailPartsWithError is readEmailParts, but returns an error when MIME
+// traversal fails before the end of the message (for example an unknown
+// charset). Partial results are discarded so a broken message is never treated
+// as an intentionally empty, handled email.
+func readEmailPartsWithError(mr *messagemail.Reader, skipAttachments bool) (string, []EmailInboundAttachment, error) {
 	var plain string
 	var fallback string
 	var attachments []EmailInboundAttachment
@@ -1161,7 +1174,7 @@ func readEmailParts(mr *messagemail.Reader, skipAttachments bool) (string, []Ema
 			break
 		}
 		if err != nil {
-			break
+			return "", nil, err
 		}
 		switch h := part.Header.(type) {
 		case *messagemail.InlineHeader:
@@ -1202,7 +1215,7 @@ func readEmailParts(mr *messagemail.Reader, skipAttachments bool) (string, []Ema
 	if body == "" {
 		body = strings.TrimSpace(fallback)
 	}
-	return body, attachments
+	return body, attachments, nil
 }
 
 func appendEmailAttachment(attachments []EmailInboundAttachment, fileName, contentType string, data []byte) []EmailInboundAttachment {
