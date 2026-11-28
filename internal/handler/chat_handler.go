@@ -109,21 +109,8 @@ func (h *Handler) Chat(c echo.Context) error {
 	// Empty desktop Chat is a destination-aware draft, even before remote
 	// repository identities arrive. Existing conversations never enter this path.
 	if h.desktopMode && historyLoaded && pendingLoaded && !hasEarlier && len(chatHistory) == 0 && len(pendingInputs) == 0 && len(inputRequests) == 0 && err == nil {
-		project, projectErr := h.projectSvc.GetByID(c.Request().Context(), currentProjectID)
-		if projectErr == nil && project != nil {
-			for _, group := range h.sharedProjects(c.Request().Context(), h.remoteServerGroups(c.Request().Context())) {
-				for _, member := range group.Members {
-					if member.ID == currentProjectID {
-						return h.sharedProjectChat(c, &group)
-					}
-				}
-			}
-			choices := []models.Project{*project}
-			if isHTMX {
-				return render(c, http.StatusOK, pages.SharedChatContent(agents, currentProjectID, choices))
-			}
-			projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
-			return render(c, http.StatusOK, pages.SharedChat(projects, currentProjectID, agents, choices))
+		if handled, renderErr := h.renderEmptyDesktopChat(c, currentProjectID, agents); handled {
+			return renderErr
 		}
 	}
 
@@ -134,6 +121,31 @@ func (h *Handler) Chat(c echo.Context) error {
 
 	projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
 	return render(c, http.StatusOK, pages.Chat(projects, currentProjectID, agents, chatHistory, chatAttachmentsByExec, pendingInputs, inputRequests, latestPlanComplete, hasEarlier, limit, optionalString(defaultAgentID)))
+}
+
+// renderEmptyDesktopChat is shared by page loads and Clear Chat so both create
+// a draft that can receive destination catalog updates.
+func (h *Handler) renderEmptyDesktopChat(c echo.Context, currentProjectID string, agents []models.LLMConfig) (bool, error) {
+	if !h.desktopMode {
+		return false, nil
+	}
+	project, projectErr := h.projectSvc.GetByID(c.Request().Context(), currentProjectID)
+	if projectErr == nil && project != nil {
+		for _, group := range h.sharedProjects(c.Request().Context(), h.remoteServerGroups(c.Request().Context())) {
+			for _, member := range group.Members {
+				if member.ID == currentProjectID {
+					return true, h.sharedProjectChat(c, &group)
+				}
+			}
+		}
+		choices := []models.Project{*project}
+		if isHTMX(c) {
+			return true, render(c, http.StatusOK, pages.SharedChatContent(agents, currentProjectID, choices))
+		}
+		projects, _ := h.projectSvc.ListSelectorOptions(c.Request().Context())
+		return true, render(c, http.StatusOK, pages.SharedChat(projects, currentProjectID, agents, choices))
+	}
+	return false, nil
 }
 
 func parseThreadWindowLimit(raw string, defaultLimit, maxLimit int) int {
@@ -919,6 +931,10 @@ func (h *Handler) ClearChat(c echo.Context) error {
 	if err != nil {
 		applog.Infof("[handler] ClearChat error listing model picker options: %v", err)
 		return err
+	}
+
+	if handled, renderErr := h.renderEmptyDesktopChat(c, projectID, agents); handled {
+		return renderErr
 	}
 
 	// Return empty chat content

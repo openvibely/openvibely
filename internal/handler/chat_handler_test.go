@@ -5434,3 +5434,31 @@ func waitForExecutionStreamSubscribers(t *testing.T, hub *events.ExecutionStream
 	}
 	t.Fatalf("timed out waiting for %d execution stream subscribers; got %d", want, hub.SubscriberCount())
 }
+
+func TestHandler_ClearChatDesktopRestoresDestinationAwareDraft(t *testing.T) {
+	h, e, configs := setupTestHandler(t)
+	h.desktopMode = true
+	createAgent(t, configs)
+	projects, err := h.projectSvc.List(context.Background())
+	if err != nil || len(projects) == 0 {
+		t.Fatalf("projects: %v", err)
+	}
+	projectID := projects[0].ID
+	for _, request := range []struct{ method, path string }{
+		{http.MethodDelete, "/chat/history?project_id=" + projectID},
+		{http.MethodGet, "/chat?project_id=" + projectID},
+	} {
+		req := httptest.NewRequest(request.method, request.path, nil)
+		req.Header.Set("HX-Request", "true")
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status %d: %s", request.path, rec.Code, rec.Body.String())
+		}
+		for _, marker := range []string{`id="shared-chat-root"`, `id="shared-chat-project"`, `openvibely-project-catalog-updated`, `data-project-send-url="/chat/send?project_id="`} {
+			if !strings.Contains(rec.Body.String(), marker) {
+				t.Errorf("%s missing %s", request.path, marker)
+			}
+		}
+	}
+}
