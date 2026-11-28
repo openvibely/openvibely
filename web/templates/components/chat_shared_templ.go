@@ -4878,4 +4878,13 @@ func composerRemoteDestination(id string) bool {
 	return remote
 }
 
+// ComposerDestinationLabel shares destination naming with the task inspector.
+func ComposerDestinationLabel(ctx context.Context, project models.Project, serverOnly bool) string {
+	return composerDestinationLabel(ctx, project, serverOnly)
+}
+
+func ComposerDestinationPrompt(serverOnly bool) string {
+	return composerDestinationPrompt(serverOnly)
+}
+
 var _ = templruntime.GeneratedTemplate

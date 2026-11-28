@@ -101,6 +101,12 @@ func TestSharedProjectChatPickerInChrome(t *testing.T) {
  window.openVibelyNavigate('/tasks/new?project_id=` + url.QueryEscape(shared.ID) + `');
  await wait(()=>document.getElementById('new-task-project')?.value==='` + remoteCopy + `');
  assert(document.getElementById('task-thread-form-project-select').textContent.trim()==='Box','new task did not remember remote');
+ const destinationRow=document.querySelector('[data-detail-property="destination_project"]');
+ assert(destinationRow.textContent.includes('Server'),'Details destination must be labeled Server');
+ assert(destinationRow.querySelector('[data-property-label]').textContent.trim()==='Box','Details destination must show server name');
+ const destinations=Array.from(document.querySelectorAll('#task-property-picker [data-options="destination_project"] button')).map(option=>option.textContent.trim());
+ assert(destinations.includes('Local')&&destinations.includes('Box'),'Details choices must use composer server labels: '+destinations);
+
  window.openVibelyNavigate('/chat?project_id=` + url.QueryEscape(shared.ID) + `');
  await wait(()=>document.getElementById('shared-chat-project')?.value==='` + remoteCopy + `' && document.getElementById('shared-chat-form').dataset.destinationModelsPending==='false');
  assert(document.getElementById('shared-chat-form-project-select').textContent.trim()==='Box','blank Chat did not remember remote');

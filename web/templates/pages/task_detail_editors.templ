@@ -6,6 +6,7 @@ import (
  "github.com/openvibely/openvibely/internal/models"
  "github.com/openvibely/openvibely/internal/persistence"
  "github.com/openvibely/openvibely/web/templates/components"
+ "github.com/openvibely/openvibely/web/templates/layout"
 )
 
 func detailPointerValue(value *string) string { if value == nil { return "" }; return *value }
@@ -66,7 +67,7 @@ templ TaskDetailEditors(task *models.Task, agents []models.LLMConfig, definition
    if task.ID == "" {
     <div data-options="destination_project">
      for _, project := range templateui.ProjectOptions(ctx) {
-      <button type="button" data-value={ project.ID } class="ov-menu-option w-full">{ project.Name }</button>
+      <button type="button" data-value={ project.ID } class="ov-menu-option w-full">{ components.ComposerDestinationLabel(ctx, project, models.IsSharedProjectID(layout.WorkspaceProjectID(ctx, task.ProjectID))) }</button>
      }
     </div>
    }
