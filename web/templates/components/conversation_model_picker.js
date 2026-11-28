@@ -66,8 +66,7 @@
           event.ctrlKey ||
           event.metaKey ||
           !event.deltaY ||
-          Math.abs(event.deltaX) > Math.abs(event.deltaY) ||
-          scrollList.scrollHeight <= scrollList.clientHeight
+          Math.abs(event.deltaX) > Math.abs(event.deltaY)
         )
           return;
         const unit =

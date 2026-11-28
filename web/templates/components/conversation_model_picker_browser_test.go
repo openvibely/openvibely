@@ -226,6 +226,8 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
 	 wheel(list,1,{deltaMode:2});assert(list.scrollTop>32,'page-mode wheel units');
 	 assert(!panel.querySelector('.ov-mp-effort').hidden,'effort stays accessible while list scrolls');
 	 list.style.maxHeight='';await wait();
+	 pinsBtn.click();
+	 assert(list.scrollHeight<=list.clientHeight && wheel(list.firstElementChild,50).defaultPrevented,'wheel on non-overflowing list does not leak to background');
 	 railTabs.style.maxHeight='50px';railTabs.scrollTop=0;await wait();
 	 assert(railTabs.scrollHeight>railTabs.clientHeight,'rail overflows when constrained');
 	 assert(wheel(railTabs.firstElementChild,40).defaultPrevented&&railTabs.scrollTop>0,'wheel on rail icon scrolls overflowing left rail');
