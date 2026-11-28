@@ -51,7 +51,10 @@ func testDesktopTaskListAlignment(t *testing.T, host string, native bool) {
 			if err := layout.Base("Desktop alignment", projects, "alpha").Render(ctx, &page); err != nil {
 				t.Fatal(err)
 			}
-			html := strings.Replace(page.String(), "</body>", desktopAlignmentScenario+"</body>", 1)
+			// Exercise the interactive shell on a returning visit. This host
+			// does not implement the macOS login transition that reveals the splash.
+			html := strings.Replace(page.String(), "<head>", `<head><script>sessionStorage.setItem('openvibely.splash','1')</script>`, 1)
+			html = strings.Replace(html, "</body>", desktopAlignmentScenario+"</body>", 1)
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if static.ServeAsset(w, r) {
 					return

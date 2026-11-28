@@ -1,5 +1,6 @@
 {
     await until(() => window.nativeTestInput, 'native input bridge');
+    await until(() => !document.querySelector('#ov-splash:not(.ov-splash-out)'), 'startup splash to release pointer input');
     let wheelScale = 1;
     const nativeInput = {postMessage(data) {
         return window.nativeTestInput.postMessage({...data,dy:(data.dy||0)*wheelScale});
