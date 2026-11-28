@@ -262,7 +262,7 @@ func runChangesExplorerBrowser(t *testing.T, saved bool) {
 		b.waitFor("thread via history", `String(!document.documentElement.classList.contains('changes-explorer-active') && document.getElementById('task-message-input')===window.historyComposer)`, "true")
 		b.evaluate(`history.forward();'changes via history'`)
 		b.waitFor("changes via history", `String(document.documentElement.classList.contains('changes-explorer-active') && document.getElementById('task-message-input')===window.historyComposer && window.historyComposer.value==='Unsent history draft')`, "true")
-		b.evaluate(`window.retainedTaskComposer=document.getElementById('task-message-input');window.retainedTaskWorkspace=window.taskWorkspace;document.getElementById('task-list-toggle').click();document.querySelector('.sidebar-aside [data-nav-base="/themes"]').click();'settings from collapsed explorer'`)
+		b.evaluate(`window.retainedTaskComposer=document.getElementById('task-message-input');window.retainedTaskWorkspace=window.taskWorkspace;document.getElementById('task-list-toggle').click();localStorage.setItem('openvibely.lastSettingsSection','/themes#themes');document.querySelector('.sidebar-aside [data-settings-entry]').click();'settings from collapsed explorer'`)
 		b.waitFor("settings ready", `String(!!document.getElementById('themes-container') && !document.querySelector('#main-content.htmx-settling'))`, "true")
 		b.waitFor("settings expands navigation without changing saved preference", `String(!document.documentElement.classList.contains('task-list-collapsed') && document.querySelector('#appearance-settings-nav [data-settings-back]').getBoundingClientRect().height>0 && localStorage.getItem('openvibely.taskListCollapsed')==='true')`, "true")
 

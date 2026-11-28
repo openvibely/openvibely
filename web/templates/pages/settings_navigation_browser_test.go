@@ -37,6 +37,8 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 			content = UpdateSettingsContent("project", update.CoordinatorSnapshot{AutomaticUpdates: true, AutomaticUpdatesSupported: true}, true, false, "")
 		case "/settings/computer":
 			content = ComputerSettingsContent([]models.Project{{ID: "project", Name: "Project"}}, "project", models.ComputerSettings{Resources: models.DefaultComputerResources(), TimeZone: "UTC", IdleMinutes: 30}, true, false, "")
+		case "/workers/stats/projects":
+			content = ProjectStatsTableBody(5, 1, 1, 0, nil)
 		case "/workers", "/settings/workers":
 			content = WorkerSettingsContent(5, 1, 1, 0, nil, nil)
 		case "/tasks":
@@ -65,6 +67,40 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 		}
 	}))
 	defer server.Close()
+	runComposerFocusCDP(t, chrome, server.URL+"/tasks?project_id=first", "settings-entry", func(b *composerFocusCDP) {
+		b.waitFor("entry ready", `String(!!window.syncAppearanceSettings && !!window.htmx)`, "true")
+		b.evaluate(`history.replaceState(history.state,'','/tasks?project_id=first');localStorage.removeItem('openvibely.lastSettingsSection');window.syncAppearanceSettings();document.querySelector('[data-settings-entry]').click();'open default'`)
+		b.waitFor("first settings item", `location.pathname+location.search+"|"+!!document.getElementById('agents-container')`, "/agents?project_id=first|true")
+		b.waitFor("agents settled", `String(!document.querySelector('.htmx-settling, .htmx-swapping'))`, "true")
+		b.evaluate(`document.querySelector('[data-settings-link="layout"]').click();'layout'`)
+		b.waitFor("layout remembered", `localStorage.getItem('openvibely.lastSettingsSection')`, "/themes#layout")
+		b.evaluate(`document.querySelector('[data-settings-back]').click();'back'`)
+		b.waitFor("workspace restored", `String(!document.documentElement.classList.contains('appearance-settings'))`, "true")
+		b.evaluate(`history.replaceState(history.state,'','/tasks?project_id=second');document.querySelector('[data-settings-entry]').click();'reopen in second project'`)
+		b.waitFor("remembered section in current project", `String(location.pathname==='/themes' && location.search==='?project_id=second' && location.hash==='#layout' && !!document.querySelector('[data-settings-section="layout"]') && !document.querySelector('[data-settings-section="layout"]').hidden)`, "true")
+		b.waitFor("layout settled", `String(!document.querySelector('.htmx-settling, .htmx-swapping'))`, "true")
+		b.evaluate(`document.querySelector('[data-settings-back]').click();'back again'`)
+		b.waitFor("workspace again", `String(!document.documentElement.classList.contains('appearance-settings'))`, "true")
+		b.evaluate(`localStorage.setItem('openvibely.lastSettingsSection','https://example.com/invalid');document.querySelector('[data-settings-entry]').click();'invalid saved section'`)
+		b.waitFor("invalid destination falls back", `String(location.pathname==='/agents' && !!document.getElementById('agents-container'))`, "true")
+		b.waitFor("fallback settled", `String(!document.querySelector('.htmx-settling, .htmx-swapping'))`, "true")
+		b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/workers"]').click();'workers'`)
+		b.waitFor("workers remembered", `localStorage.getItem('openvibely.lastSettingsSection')`, "/workers")
+		// Simulate another tab's selection through a separate same-origin document.
+		b.evaluate(`window.otherSettings=document.createElement('iframe');document.body.appendChild(window.otherSettings);window.otherSettings.contentWindow.localStorage.setItem('openvibely.lastSettingsSection','/themes#layout');'other document selects layout'`)
+		b.waitFor("other document remembers layout", `localStorage.getItem('openvibely.lastSettingsSection')`, "/themes#layout")
+		b.evaluate(`window.otherSettings.remove();window.workerRefreshSettled=false;document.addEventListener('htmx:afterSettle',function onStats(e){if(e.detail.elt.id==='project-stats-tbody'){window.workerRefreshSettled=true;document.removeEventListener('htmx:afterSettle',onStats);}});htmx.ajax('GET','/workers/stats/projects',{target:'#project-stats-tbody',swap:'outerHTML'});'refresh worker stats'`)
+		b.waitFor("worker refresh settles", `String(window.workerRefreshSettled)`, "true")
+		b.waitFor("polling preserves other document selection", `localStorage.getItem('openvibely.lastSettingsSection')`, "/themes#layout")
+		b.evaluate(`document.querySelector('[data-settings-back]').click();'leave workers'`)
+		b.waitFor("left workers", `String(!document.documentElement.classList.contains('appearance-settings'))`, "true")
+		b.evaluate(`document.querySelector('[data-settings-entry]').click();'reopen latest section'`)
+		b.waitFor("latest section reopened", `String(location.hash==='#layout' && !!document.getElementById('themes-container') && !document.querySelector('.htmx-settling, .htmx-swapping'))`, "true")
+		b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/workers"]').click();'visit workers again'`)
+		b.waitFor("explicit visit remembers workers again", `localStorage.getItem('openvibely.lastSettingsSection')`, "/workers")
+
+	})
+	workspaceRequests.Store(0)
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks", "settings-navigation", func(b *composerFocusCDP) {
 		// A swapped fragment can be visible before HTMX processes its links. Wait
 		// for settlement before clicking again, otherwise a native navigation can
@@ -90,7 +126,7 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 		for _, route := range []string{"models", "shortcuts", "channels", "skills", "agents"} {
 			b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/` + route + `"] ').click();'configuration'`)
 			waitFor("settings navigation survives "+route, `String(!!document.getElementById('`+route+`-container') && document.documentElement.classList.contains('appearance-settings') && !document.documentElement.classList.contains('task-list-collapsed'))`, "true")
-			waitFor("settings rail selected", `String(document.querySelector('.sidebar-aside [data-nav-base="/themes"]').getAttribute('aria-current')==='page')`, "true")
+			waitFor("settings rail selected", `String(document.querySelector('.sidebar-aside [data-settings-entry]').getAttribute('aria-current')==='page')`, "true")
 			if route == "shortcuts" {
 				b.evaluate(`history.back();'back from shortcuts'`)
 				waitFor("models before shortcuts", `String(!!document.getElementById('models-container'))`, "true")
@@ -222,8 +258,8 @@ func TestBrowserFunctional_SettingsClosesConversationModelPicker(t *testing.T) {
 		}
 		var content templ.Component
 		switch r.URL.Path {
-		case "/themes":
-			content = ThemesContent(nil)
+		case "/agents":
+			content = templ.Raw(`<div id="agents-container">Agents</div>`)
 		case "/models":
 			content = templ.Raw(`<div id="models-container">Models</div>`)
 		case "/chat", "/tasks/picker-thread":
@@ -258,17 +294,18 @@ func TestBrowserFunctional_SettingsClosesConversationModelPicker(t *testing.T) {
 				b.click(`#conversation-model-picker .ov-mp-provider`)
 				b.waitFor("provider tab active", `String(document.querySelector('#conversation-model-picker .ov-mp-provider')?.getAttribute('aria-selected')==='true')`, "true")
 				b.evaluate(`window.pickerNavigationRequests=0;document.addEventListener('htmx:beforeRequest',()=>window.pickerNavigationRequests++);window.pickerOriginalURL=location.href;'watch navigation'`)
-				b.clickMenuBackdrop(`#sidebar [data-nav-base="/themes"]`)
+				b.clickMenuBackdrop(`#sidebar [data-settings-entry]`)
 				b.waitFor("first click only dismisses", `String(document.getElementById('conversation-model-picker').hidden && window.originalPickerButton.getAttribute('aria-expanded')==='false' && location.href===window.pickerOriginalURL && !document.getElementById('settings-retained-workspace') && window.pickerNavigationRequests===0 && !window._sidebarNavigating)`, "true")
-				b.click(`#sidebar [data-nav-base="/themes"]`)
-				b.waitFor("workspace hidden in settings", `String(!!document.getElementById('themes-container') && !!window.originalPickerButton.closest('#settings-retained-workspace'))`, "true")
+				b.click(`#sidebar [data-settings-entry]`)
+				b.waitFor("workspace hidden in settings", `String(!!document.getElementById('agents-container') && !!window.originalPickerButton.closest('#settings-retained-workspace'))`, "true")
 				b.waitFor("picker dismissed", `String(document.getElementById('conversation-model-picker').hidden && window.originalPickerButton.getAttribute('aria-expanded')==='false')`, "true")
 				b.evaluate(`window.restoreSettingsWorkspace(false);window.ovModelPicker.open(window.originalPickerButton);'reopened'`)
 				b.waitFor("retained picker usable", `String(window.originalPickerButton.isConnected && !document.getElementById('conversation-model-picker').hidden)`, "true")
 				b.click(`#conversation-model-picker .ov-mp-rail-action`)
 				b.waitFor("manage models gear dismisses picker and navigates to models", `String(document.getElementById('conversation-model-picker').hidden && !!document.getElementById('models-container') && !!window.originalPickerButton.closest('#settings-retained-workspace'))`, "true")
 				b.evaluate(`window.restoreSettingsWorkspace(false);window.ovModelPicker.open(window.originalPickerButton);'reopened-after-models'`)
-				b.waitFor("picker reopens after returning from models", `String(window.originalPickerButton.isConnected && !document.getElementById('conversation-model-picker').hidden)`, "true") // Every shared menu consumes dismissal before Settings' capture handler.
+				b.waitFor("picker reopens after returning from models", `String(window.originalPickerButton.isConnected && !document.getElementById('conversation-model-picker').hidden)`, "true")
+				// Every shared menu consumes dismissal before Settings' capture handler.
 				windowClose := `window.ovModelPicker.close(false);`
 				for _, menu := range []struct{ name, open, closed string }{
 					{"mode", `window._openChatCustomSelectPanel(document.querySelector('.chat-mode-select'))`, `document.getElementById('chat-custom-select-panel').style.display==='none'`},
@@ -279,9 +316,9 @@ func TestBrowserFunctional_SettingsClosesConversationModelPicker(t *testing.T) {
 					b.evaluate(windowClose + menu.open + `;'opened'`)
 					b.waitFor(menu.name+" open", `String(!(`+menu.closed+`))`, "true")
 					b.evaluate(`window.pickerNavigationRequests=0;window.pickerOriginalURL=location.href;'reset'`)
-					b.clickMenuBackdrop(`#sidebar [data-nav-base="/themes"]`)
+					b.clickMenuBackdrop(`#sidebar [data-settings-entry]`)
 					b.waitFor(menu.name+" first click only dismisses", `String((`+menu.closed+`) && location.href===window.pickerOriginalURL && window.pickerNavigationRequests===0 && !document.getElementById('settings-retained-workspace'))`, "true")
-					b.click(`#sidebar [data-nav-base="/themes"]`)
+					b.click(`#sidebar [data-settings-entry]`)
 					b.waitFor(menu.name+" second click navigates", `String(!!document.getElementById('settings-retained-workspace'))`, "true")
 					b.evaluate(`window.restoreSettingsWorkspace(false);document.getElementById('dismiss-test')?.remove();'restored'`)
 				}

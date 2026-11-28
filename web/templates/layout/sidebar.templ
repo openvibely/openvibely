@@ -314,7 +314,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 
 							// Update all sidebar nav links with new project_id
 							if (typeof window.openVibelyRefreshPluginNav === 'function') window.openVibelyRefreshPluginNav(newProjectId);
-							document.querySelectorAll('[data-nav-base]').forEach(function(link) {							const base = link.getAttribute('data-nav-base');
+							document.querySelectorAll('[data-nav-base]:not([data-settings-entry])').forEach(function(link) {							const base = link.getAttribute('data-nav-base');
 							const newUrl = base + '?project_id=' + encodeURIComponent(newProjectId);
 							link.setAttribute('href', newUrl);
 							link.setAttribute('hx-get', newUrl);
@@ -428,7 +428,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 						previousProjectID = projectID;
 						syncProjectSelector();
 						if (typeof window.openVibelyRefreshPluginNav === 'function') window.openVibelyRefreshPluginNav(projectID);
-						document.querySelectorAll('[data-nav-base]').forEach(function(link) {
+						document.querySelectorAll('[data-nav-base]:not([data-settings-entry])').forEach(function(link) {
 							var scopedURL = link.getAttribute('data-nav-base') + '?project_id=' + encodeURIComponent(projectID);
 							link.setAttribute('href', scopedURL);
 							link.setAttribute('hx-get', scopedURL);
@@ -746,7 +746,7 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 							var currentPath = new URL(window.openVibelyDisplayedURL ? window.openVibelyDisplayedURL() : location.href).pathname;
 							document.querySelectorAll('[data-nav-base], [data-sidebar-path]').forEach(function(link) {
 								var base = link.getAttribute('data-nav-base') || link.getAttribute('data-sidebar-path');
-                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (base === '/themes' && /^\/(shortcuts|models|agents|skills|channels|organization|workers|settings\/workers|settings\/computer|settings\/updates|settings\/plugin-pages)(\/|$)/.test(currentPath));
+                                var active = base === currentPath || (base === '/workers' && currentPath === '/settings/workers') || (link.hasAttribute('data-settings-entry') && /^\/(themes|servers|shortcuts|models|agents|skills|channels|organization|workers|settings\/workers|settings\/computer|settings\/updates|settings\/plugin-pages)(\/|$)/.test(currentPath));
 								if (active) link.setAttribute('aria-current', 'page');
 								else link.removeAttribute('aria-current');
 							});
@@ -1123,9 +1123,10 @@ templ Sidebar(projects []models.Project, currentProjectID string) {
 			<ul class="menu menu-sm p-0 sidebar-footer-menu">
 				<li>
 					<a
-						data-nav-base="/themes"
-						href={ templ.SafeURL(fmt.Sprintf("/themes?project_id=%s", currentProjectID)) }
-						hx-get={ fmt.Sprintf("/themes?project_id=%s", currentProjectID) }
+						data-settings-entry
+						data-nav-base="/settings"
+						href={ templ.SafeURL(fmt.Sprintf("/agents?project_id=%s", currentProjectID)) }
+						hx-get={ fmt.Sprintf("/agents?project_id=%s", currentProjectID) }
 						hx-target="#main-content"
 						hx-push-url="true"
 					>

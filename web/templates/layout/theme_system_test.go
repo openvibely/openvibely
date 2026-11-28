@@ -349,19 +349,19 @@ func TestSidebarSettingsLinkIsInFooter(t *testing.T) {
 	if navStart == -1 || footerStart == -1 {
 		t.Fatal("sidebar main navigation or footer not rendered")
 	}
-	if strings.Count(html, `data-nav-base="/themes"`) != 1 {
+	if strings.Count(html, `data-settings-entry data-nav-base="/settings"`) != 1 {
 		t.Fatal("sidebar must render exactly one Settings link")
 	}
-	if strings.Contains(html[navStart:footerStart], `data-nav-base="/themes"`) {
+	if strings.Contains(html[navStart:footerStart], `data-settings-entry data-nav-base="/settings"`) {
 		t.Fatal("Settings link must not be rendered in the main navigation list")
 	}
 	footer := html[footerStart:]
-	if !strings.Contains(footer, `data-nav-base="/themes"`) || !strings.Contains(footer, `<span class="sidebar-text">Settings</span>`) {
+	if !strings.Contains(footer, `data-settings-entry data-nav-base="/settings"`) || !strings.Contains(footer, `<span class="sidebar-text">Settings</span>`) {
 		t.Fatal("Settings link must be rendered in the sidebar footer")
 	}
 	userMenu := strings.Index(footer, `id="sidebar-user-menu"`)
 	userMenuEnd := strings.Index(footer[userMenu:], `</ul>`)
-	if strings.Contains(footer[userMenu:userMenu+userMenuEnd], `data-nav-base="/themes"`) {
+	if strings.Contains(footer[userMenu:userMenu+userMenuEnd], `data-settings-entry data-nav-base="/settings"`) {
 		t.Fatal("Settings link must not be rendered inside the footer user menu")
 	}
 }
