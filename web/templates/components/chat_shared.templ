@@ -3366,7 +3366,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
                             form.setAttribute('hx-post', normalPostEndpoint);
                             htmx.process(form);
                         }
-                        var hasDraft = explicitDestination || !['', 'auto', 'default'].includes(form.querySelector('[name="agent_id"]')?.value || '') || !!composerMessage().trim() || !!form.querySelector('[data-pending-attachment]') || !!root?.querySelector('input[name="title"]')?.value.trim();
+                        var hasDraft = explicitDestination || !!root?.querySelector('[data-draft-property="agent_definition_id"]')?.value || !['', 'auto', 'default'].includes(form.querySelector('[name="agent_id"]')?.value || '') || !!composerMessage().trim() || !!form.querySelector('[data-pending-attachment]') || !!root?.querySelector('input[name="title"]')?.value.trim();
                         var next = projectInput.value;
                         if (!hasDraft && scope !== currentScope) {
                             var saved = '';

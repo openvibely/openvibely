@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/persistence"
 	"github.com/openvibely/openvibely/web/static"
 	templateui "github.com/openvibely/openvibely/web/templates"
 	"github.com/openvibely/openvibely/web/templates/layout"
@@ -15,15 +16,16 @@ import (
 
 func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	for _, scenario := range []struct{ chat, remote, dirty, remembered, pending, pasted bool }{
+	for _, scenario := range []struct{ chat, remote, dirty, remembered, pending, pasted, agent bool }{
 		{dirty: true}, {chat: true, dirty: true}, {remote: true}, {chat: true, remote: true},
 		{remote: true, dirty: true}, {chat: true, remote: true, dirty: true},
 		{remembered: true}, {chat: true, remembered: true}, {chat: true, dirty: true, pending: true},
 		{remote: true, pasted: true}, {chat: true, remote: true, pasted: true},
 		{remembered: true, pasted: true}, {chat: true, remembered: true, pasted: true},
+		{remote: true, agent: true}, {remembered: true, agent: true},
 	} {
 		chat := scenario.chat
-		t.Run(fmt.Sprint("chat=", chat, "/remote=", scenario.remote, "/dirty=", scenario.dirty, "/remembered=", scenario.remembered, "/pending=", scenario.pending, "/pasted=", scenario.pasted), func(t *testing.T) {
+		t.Run(fmt.Sprint("chat=", chat, "/remote=", scenario.remote, "/dirty=", scenario.dirty, "/remembered=", scenario.remembered, "/pending=", scenario.pending, "/pasted=", scenario.pasted, "/agent=", scenario.agent), func(t *testing.T) {
 			projects := []models.Project{{ID: "local-one", Name: "Foo"}, {ID: "r-1234567890abcdef-remote-one", Name: "Foo"}}
 			initial := 0
 			if scenario.remote {
@@ -67,7 +69,7 @@ func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 				if chat {
 					_ = SharedChat(projects, projects[initial].ID, nil, projects[initial:initial+1]).Render(ctx, w)
 				} else {
-					_ = NewTask(projects, &projects[initial], nil, nil).Render(ctx, w)
+					_ = NewTask(projects, &projects[initial], nil, []persistence.AgentTaskUIOption{{ID: "chosen-agent", Name: "Chosen Agent", Enabled: true, SelectableAsPrimary: true}}).Render(ctx, w)
 				}
 			}))
 			defer server.Close()
@@ -85,6 +87,11 @@ func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 				}
 				if scenario.remembered {
 					b.evaluate(`localStorage.setItem("ov.composer.destination.__repo_1234567890abcdef","r-1234567890abcdef-remote-one");"saved"`)
+				}
+				if scenario.agent {
+					b.click(`#tab-details [data-detail-property="agent_definition_id"]`)
+					b.click(`#task-property-picker [data-options="agent_definition_id"] button[data-value="chosen-agent"]`)
+					b.waitFor("Agent selected", `document.querySelector('[data-draft-property="agent_definition_id"]').value`, "chosen-agent")
 				}
 				if scenario.dirty {
 					b.evaluate(`document.querySelector('textarea[name="message"]').value='keep this draft';'typed'`)
@@ -113,7 +120,7 @@ func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 				if scenario.remembered {
 					expected = projects[1].ID
 				}
-				if scenario.dirty || scenario.pasted {
+				if scenario.dirty || scenario.pasted || scenario.agent {
 					expected = projects[initial].ID
 				}
 				b.waitFor("destination preserved or defaulted", fmt.Sprintf(`String(document.getElementById(document.querySelector('[data-project-input]').dataset.projectInput).value===%q)`, expected), "true")
@@ -124,6 +131,10 @@ func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 					b.waitFor("pasted card preserved", `String(document.querySelector('[data-pasted-text-cards]').children.length === 1)`, "true")
 					b.evaluate(`document.querySelector('[data-pasted-text-cards] .ov-paste-show').click();'expanded'`)
 					b.waitFor("pasted content preserved", `String(document.querySelector('textarea[name="message"]').value === 'keep this pasted draft '.repeat(300))`, "true")
+				}
+				if scenario.agent {
+					b.waitFor("Agent preserved", `document.querySelector('[data-draft-property="agent_definition_id"]').value`, "chosen-agent")
+					b.waitFor("Agent label preserved", `document.querySelector('#tab-details [data-detail-property="agent_definition_id"] [data-property-label]').textContent`, "Chosen Agent")
 				}
 				if attachmentCase {
 					b.waitFor("attachment draft migrated", `String(!!sessionStorage.getItem('openvibely-page-attachments-shared-chat-__repo_1234567890abcdef') && !sessionStorage.getItem('openvibely-page-attachments-shared-chat-local-one'))`, "true")
