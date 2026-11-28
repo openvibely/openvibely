@@ -87,7 +87,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
     @NewTaskOptionsRow()
    </div>
   </div>
-  @TaskDetailEditors(&models.Task{}, agents, agentDefs)
+  @TaskDetailEditors(&models.Task{ProjectID: project.ID}, agents, agentDefs)
   @TaskWorkspaceScript()
   <script>
    (function() {
@@ -198,7 +198,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
       var row = destination.closest('[data-detail-property="destination_project"]');
       var option = root.querySelector('#task-property-picker [data-options="destination_project"] button[data-value="' + CSS.escape(destination.value) + '"]');
       row.dataset.value = destination.value;
-      row.querySelector('[data-property-label]').textContent = option ? option.textContent : 'Choose a project';
+      row.querySelector('[data-property-label]').textContent = option ? option.textContent.trim() : row.dataset.placeholder;
      });
     }
     root.querySelectorAll('#tab-details input, #tab-details select, #tab-details textarea').forEach(function(input) {
@@ -576,8 +576,8 @@ func projectDefaultAgentID(project *models.Project) string {
 // Project selection uses the same compact row as the other Task properties.
 templ NewTaskProjectRow(project *models.Project, projects []models.Project) {
  if models.IsAggregateProject(layout.WorkspaceProjectID(ctx, project.ID)) {
-  <button type="button" class="task-property-row inspector-property-row" data-detail-property="destination_project" data-value={ newTaskDestinationValue(project) } aria-haspopup="dialog">
-   @components.InspectorPropertyContent("Project", newTaskDestinationLabel(project))
+  <button type="button" class="task-property-row inspector-property-row" data-detail-property="destination_project" data-value={ newTaskDestinationValue(project) } aria-haspopup="dialog" data-placeholder={ components.ComposerDestinationPrompt(models.IsSharedProjectID(layout.WorkspaceProjectID(ctx, project.ID))) }>
+   @components.InspectorPropertyContent(newTaskDestinationProperty(ctx, project), newTaskDestinationLabel(ctx, project))
    <input type="hidden" id="new-task-project" name="destination_project" form="task-thread-form" data-draft-property="destination_project" value={ newTaskDestinationValue(project) }/>
   </button>
  }
@@ -592,7 +592,12 @@ func newTaskDestinationValue(project *models.Project) string {
  if models.IsAggregateProject(project.ID) { return "" }
  return project.ID
 }
-func newTaskDestinationLabel(project *models.Project) string {
- if models.IsAggregateProject(project.ID) { return "Choose a project" }
- return project.Name
+func newTaskDestinationProperty(ctx context.Context, project *models.Project) string {
+ if models.IsSharedProjectID(layout.WorkspaceProjectID(ctx, project.ID)) { return "Server" }
+ return "Project"
+}
+func newTaskDestinationLabel(ctx context.Context, project *models.Project) string {
+ serverOnly := models.IsSharedProjectID(layout.WorkspaceProjectID(ctx, project.ID))
+ if models.IsAggregateProject(project.ID) { return components.ComposerDestinationPrompt(serverOnly) }
+ return components.ComposerDestinationLabel(ctx, *project, serverOnly)
 }

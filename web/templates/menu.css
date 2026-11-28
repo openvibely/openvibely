@@ -150,6 +150,13 @@
   border-bottom: 1px solid var(--ov-border-subtle, #414753);
   flex-shrink: 0;
 }
+/* No separator or empty results padding when only the create action remains. */
+.inspector-picker:not(:has(.ov-menu-list [data-options]:not([hidden]) button[data-value]:not([hidden]))) > .ov-menu-create-row {
+  border-bottom: 0;
+}
+.inspector-picker:has(> .ov-menu-create-row:not([hidden])) > .ov-menu-list:not(:has([data-options]:not([hidden]) button[data-value]:not([hidden]))):not(:has([data-tag-loading]:not([hidden]))) {
+  padding-block: 0;
+}
 .ov-menu-create-row svg { width: 16px; height: 16px; flex-shrink: 0; }
 
 /* Section labels share the model picker's compact, muted presentation. */
