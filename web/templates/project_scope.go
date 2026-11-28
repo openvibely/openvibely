@@ -62,3 +62,15 @@ func ProjectServerIcon(ctx context.Context, projectID string) templ.Component {
 func ProjectServerName(ctx context.Context, projectID string) string {
 	return projectServerDisplay(ctx, projectID).Name
 }
+
+// WithLocalComposerEnabled controls automatic destination selection, not visibility.
+func WithLocalComposerEnabled(ctx context.Context, enabled bool) context.Context {
+	return context.WithValue(ctx, localComposerEnabledKey{}, enabled)
+}
+
+type localComposerEnabledKey struct{}
+
+func LocalComposerEnabled(ctx context.Context) bool {
+	enabled, ok := ctx.Value(localComposerEnabledKey{}).(bool)
+	return !ok || enabled
+}

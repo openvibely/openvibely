@@ -637,6 +637,9 @@ func render(c echo.Context, status int, component templ.Component) error {
 	ctx := c.Request().Context()
 	if h, ok := c.Get("handler").(*Handler); ok {
 		ctx = templateui.WithMessageAuthors(ctx, h.authEnabled())
+		if h.desktopMode && h.localBackend != nil {
+			ctx = templateui.WithLocalComposerEnabled(ctx, h.localBackend.Mode() == "on")
+		}
 		machineCtx := ctx
 		ctx = layout.WithTaskMachineLoader(ctx, func() map[string]layout.TaskMachine {
 			machines := map[string]layout.TaskMachine{}

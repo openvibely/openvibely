@@ -15,13 +15,36 @@ func TestComposerDestinationLabel(t *testing.T) {
 		shared   bool
 		want     string
 	}{
-		{"local", "Repo · This computer", true, "This computer"},
+		{"local", "Repo · This computer", true, "Local"},
 		{remoteid.ID("0123456789abcdef", "p"), "Repo · oldmac", true, "oldmac"},
 		{remoteid.ID("0123456789abcdef", "p"), "Repo · oldmac", false, "Repo · oldmac"},
-		{"local", "Repo · This computer (~/second-copy)", true, "This computer (~/second-copy)"},
+		{"local", "Repo · This computer (~/second-copy)", true, "Local (~/second-copy)"},
 	} {
 		if got := composerDestinationLabel(ctx, models.Project{ID: tc.id, Name: tc.name}, tc.shared); got != tc.want {
 			t.Errorf("got %q, want %q", got, tc.want)
 		}
+	}
+}
+
+func TestComposerDefaultDestination(t *testing.T) {
+	remote := models.Project{ID: remoteid.ID("0123456789abcdef", "p")}
+	local := models.Project{ID: "local"}
+	for _, tc := range []struct {
+		name            string
+		enabled, shared bool
+		choices         []models.Project
+		want            string
+	}{
+		{"local available", true, true, []models.Project{remote, local}, "local"},
+		{"local disabled", false, true, []models.Project{local, remote}, ""},
+		{"remote only", true, true, []models.Project{remote}, ""},
+		{"all projects", true, false, []models.Project{local, remote}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := templateui.WithLocalComposerEnabled(context.Background(), tc.enabled)
+			if got := composerDefaultDestination(ctx, tc.choices, tc.shared); got != tc.want {
+				t.Fatalf("got %q want %q", got, tc.want)
+			}
+		})
 	}
 }

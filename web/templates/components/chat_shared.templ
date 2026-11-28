@@ -7,6 +7,7 @@ import (
 	llmoutput "github.com/openvibely/openvibely/internal/llm/output"
 
 	"github.com/openvibely/openvibely/internal/models"
+ "github.com/openvibely/openvibely/internal/remoteid"
 	"github.com/openvibely/openvibely/web/static"
 	templateui "github.com/openvibely/openvibely/web/templates"
 	"net/url"
@@ -1710,6 +1711,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								id={ config.FormID + "-project-select" }
 								class="chat-project-select chat-custom-select-btn btn btn-ghost btn-xs h-7 min-h-0 text-xs font-normal opacity-50 hover:opacity-100 w-auto min-w-0 max-w-[8rem] sm:max-w-[200px] rounded-lg flex items-center gap-1 px-2"
 								data-project-input={ config.ProjectInputID }
+                                data-default-destination={ composerDefaultDestination(ctx, config.ProjectChoices, config.ProjectServerOnly) }
 								data-project-send-url={ config.ProjectSendURL }
 								data-project-open-url={ config.ProjectOpenURL }
 								data-placeholder={ composerDestinationPrompt(config.ProjectServerOnly) }
@@ -3256,6 +3258,12 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					projectSendPending = false;
 					submitComposer(normalPostEndpoint, 'normal');
 				});
+                // Run after page-specific destination listeners and draft restoration are installed.
+                setTimeout(function() {
+                    if (!form.isConnected || projectInput.value || !projectSelect.dataset.defaultDestination) return;
+                    projectInput.value = projectSelect.dataset.defaultDestination;
+                    projectInput.dispatchEvent(new Event('change', {bubbles: true}));
+                });
 				// Closing the picker without a choice cancels the waiting Send, not the draft.
 				new MutationObserver(function() {
 					if (projectSelect.getAttribute('aria-expanded') === 'false') projectSendPending = false;
@@ -7724,6 +7732,13 @@ templ ComposerModelOptions(agents []models.LLMConfig, defaultAgentID string) {
 }
 
 func composerDestinationLabel(ctx context.Context, project models.Project, serverOnly bool) string {
+ if _, _, remote := remoteid.Split(project.ID); !remote {
+  if serverOnly {
+   if i := strings.Index(project.Name, " · This computer"); i >= 0 { return "Local" + project.Name[i+len(" · This computer"):] }
+   return "Local"
+  }
+  return strings.Replace(project.Name, " · This computer", " · Local", 1)
+ }
  if serverOnly {
   name := templateui.ProjectServerName(ctx, project.ID)
   if name != "" {
@@ -7737,4 +7752,12 @@ func composerDestinationLabel(ctx context.Context, project models.Project, serve
 func composerDestinationPrompt(serverOnly bool) string {
  if serverOnly { return "Select a server" }
  return "Choose a project"
+}
+
+func composerDefaultDestination(ctx context.Context, choices []models.Project, serverOnly bool) string {
+ if !serverOnly || !templateui.LocalComposerEnabled(ctx) { return "" }
+ for _, project := range choices {
+  if _, _, remote := remoteid.Split(project.ID); !remote && !models.IsAggregateProject(project.ID) { return project.ID }
+ }
+ return ""
 }
