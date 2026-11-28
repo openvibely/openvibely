@@ -129,10 +129,15 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 			const key = gate.active ? matchAgentLoad(input) : '';
 			if (!key) return originalFetch(input, init);
 			gate.requests[key] = (gate.requests[key] || 0) + 1;
-			return new Promise((resolve, reject) => {
-				originalFetch(input, init).then(response => {
-					(gate.queued[key] = gate.queued[key] || []).push({ response, resolve });
-				}).catch(reject);
+			return originalFetch(input, init).then(response => {
+				const readJSON = response.json.bind(response);
+				// Gate the parsed body so release resumes the modal's final await.
+				response.json = () => new Promise((resolve, reject) => {
+					readJSON().then(data => {
+						(gate.queued[key] = gate.queued[key] || []).push(() => resolve(data));
+					}, reject);
+				});
+				return response;
 			});
 		};
 		const waitForRequest = async key => {
@@ -143,7 +148,7 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 			for (let i = 0; i < 200 && (!gate.queued[key] || gate.queued[key].length === 0); i++) await sleep(10);
 			const queued = gate.queued[key] && gate.queued[key].shift();
 			if (!queued) throw new Error('timed out waiting to release ' + key);
-			queued.resolve(queued.response);
+			queued();
 		};
 		const clickCard = id => {
 			const card = document.querySelector('[data-agent-id="' + id + '"]');
@@ -163,7 +168,6 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 		await waitForRequest(agentB + '/lifecycle-hooks');
 		await release(agentB + '/lifecycle-hooks');
 		await release(agentA + '/json');
-		await sleep(100);
 
 		const assertBModalState = () => {
 			const key = document.getElementById('advanced_key').value;
@@ -193,7 +197,6 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 		await waitForRequest(agentB + '/lifecycle-hooks');
 		await release(agentB + '/lifecycle-hooks');
 		await release(agentA + '/lifecycle-hooks');
-		await sleep(100);
 		assertBModalState();
 
 		const save = document.getElementById('agent_save_btn');
@@ -224,7 +227,6 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 		await waitForRequest(agentB + '/lifecycle-hooks');
 		await release(agentB + '/lifecycle-hooks');
 		await release(agentProtected + '/json');
-		await sleep(100);
 		const regularHookKeys = Array.from(document.querySelectorAll('[data-hook-field="skill_key"]')).map(input => input.value);
 		if (document.getElementById('advanced_key').value !== 'agent_b_key' || !document.getElementById('advanced_enabled') || !document.getElementById('advanced_scope') || document.getElementById('advanced_key').disabled || document.getElementById('advanced_scope').disabled || !document.getElementById('advanced_protected_notice').classList.contains('hidden') || regularHookKeys.length !== 1 || regularHookKeys[0] !== 'agent_b_hook') {
 			throw new Error('protected-to-regular switch left protected state active: ' + JSON.stringify({key: document.getElementById('advanced_key').value, keyDisabled: document.getElementById('advanced_key').disabled, scopeDisabled: document.getElementById('advanced_scope').disabled, protectedVisible: !document.getElementById('advanced_protected_notice').classList.contains('hidden'), hookKeys: regularHookKeys}));
@@ -239,7 +241,6 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 		await waitForRequest(agentProtected + '/lifecycle-hooks');
 		await release(agentProtected + '/lifecycle-hooks');
 		await release(agentB + '/json');
-		await sleep(100);
 		if (document.getElementById('advanced_key').value !== 'protected_agent_key' || !document.getElementById('advanced_key').disabled || !document.getElementById('advanced_scope').disabled || document.getElementById('advanced_protected_notice').classList.contains('hidden') || !Array.from(document.querySelectorAll('[data-hook-field="skill_key"]')).some(input => input.value === 'protected_hook')) {
 			throw new Error('regular-to-protected switch lost protected state: ' + JSON.stringify({key: document.getElementById('advanced_key').value, keyDisabled: document.getElementById('advanced_key').disabled, scopeDisabled: document.getElementById('advanced_scope').disabled, protectedVisible: !document.getElementById('advanced_protected_notice').classList.contains('hidden'), hookKeys: Array.from(document.querySelectorAll('[data-hook-field="skill_key"]')).map(input => input.value)}));
 		}
@@ -254,7 +255,7 @@ func TestAgentEditModalIgnoresOutOfOrderLifecycleResponsesInChrome(t *testing.T)
 		await release(agentProtected + '/json');
 		await waitForRequest(agentProtected + '/lifecycle-hooks');
 		await release(agentProtected + '/lifecycle-hooks');
-		if (document.getElementById('advanced_key').value !== 'protected_agent_key' || document.getElementById('advanced_protected_notice').classList.contains('hidden')) {
+		if (document.getElementById('advanced_key').value !== 'protected_agent_key' || document.getElementById('advanced_protected_notice').classList.contains('hidden') || !Array.from(document.querySelectorAll('[data-hook-field="skill_key"]')).some(input => input.value === 'protected_hook')) {
 			throw new Error('reopening same protected agent lost current hydration');
 		}
 		await originalFetch('/browser-result?status=pass&message=out-of-order JSON and hook responses preserved B and persisted A/B state');
