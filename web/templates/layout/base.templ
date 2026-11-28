@@ -273,9 +273,9 @@ templ Base(title string, projects []models.Project, currentProjectID string) {
 			<script src={ static.URL("thread-snapshots.js") }></script>
 			<script src={ static.URL("chat-input-requests.js") }></script>
             <script src={ static.URL("plugin-nav-overflow.js") }></script>
-  <script src={ static.URL("page-chat.js") }></script>
-			<script defer src={ static.URL("model-provider-icons.js") }></script>
-			<script defer src={ static.URL("kanban.js") }></script>			<script defer src={ static.URL("thread-output-window.js") }></script>
+ <script src={ static.URL("page-chat.js") }></script>
+			<script defer src={ static.URL("kanban.js") }></script>
+			<script defer src={ static.URL("thread-output-window.js") }></script>
 			<script defer src={ static.URL("thread-navigation.js") }></script>
 			<script defer src={ static.URL("chat-virtual-list.js") } data-chat-virtual-list></script>
 			<script defer src={ static.URL("thread-empty-stage.js") }></script>
@@ -5853,12 +5853,12 @@ font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberati
 								requestAnimationFrame(function() { requestAnimationFrame(visible); });
 							});
 						}
-					})();
-				</script>
-			</div>
-			<script>
-						(function() {
-							var collapsed = document.documentElement.getAttribute('data-ui-sidebar-collapsed') === 'true';
+						})();
+					</script>
+				</div>
+				<script src={ static.URL("model-provider-icons.js") }></script>
+				<script>
+							(function() {							var collapsed = document.documentElement.getAttribute('data-ui-sidebar-collapsed') === 'true';
 							if (collapsed) {
 								document.body.classList.add('sidebar-collapsed-pending');
 							}
