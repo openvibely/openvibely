@@ -775,14 +775,14 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			}
 		}
 		if _, _, remote := remoteid.Split(task.ProjectID); remote {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<span class=\"inline-flex items-center\" tabindex=\"0\" aria-label=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<span class=\"inline-flex items-center self-center shrink-0 [&_svg]:w-3.5 [&_svg]:h-3.5\" tabindex=\"0\" aria-label=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var30 string
 			templ_7745c5c3_Var30, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templateui.ProjectServerName(ctx, task.ProjectID)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 387, Col: 142}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 387, Col: 191}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var30)
 			if templ_7745c5c3_Err != nil {
@@ -795,7 +795,7 @@ func TaskCard(task models.Task, projectID string, viewingCategory string, llmMod
 			var templ_7745c5c3_Var31 string
 			templ_7745c5c3_Var31, templ_7745c5c3_Err = templruntime.NewAttributeExpression(templateui.ProjectServerName(ctx, task.ProjectID)).Resolve(ctx)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 387, Col: 205}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `web/templates/components/task_card.templ`, Line: 387, Col: 254}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ_7745c5c3_Var31)
 			if templ_7745c5c3_Err != nil {

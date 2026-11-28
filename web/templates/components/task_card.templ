@@ -384,7 +384,7 @@ templ TaskCard(task models.Task, projectID string, viewingCategory string, llmMo
                             <span class="badge badge-sm badge-outline" data-project-label>{ strings.TrimSuffix(label, " · "+templateui.ProjectServerName(ctx, task.ProjectID)) }</span>
                         }
                         if _, _, remote := remoteid.Split(task.ProjectID); remote {
-                            <span class="inline-flex items-center" tabindex="0" aria-label={ templateui.ProjectServerName(ctx, task.ProjectID) } data-tip={ templateui.ProjectServerName(ctx, task.ProjectID) }>
+                            <span class="inline-flex items-center self-center shrink-0 [&_svg]:w-3.5 [&_svg]:h-3.5" tabindex="0" aria-label={ templateui.ProjectServerName(ctx, task.ProjectID) } data-tip={ templateui.ProjectServerName(ctx, task.ProjectID) }>
                                 @templateui.ProjectServerIcon(ctx, task.ProjectID)
                             </span>
                         }
