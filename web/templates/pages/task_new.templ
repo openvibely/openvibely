@@ -81,6 +81,7 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
      PostEndpoint: newTaskPostURL(ctx, project.ID),
      TargetID: "main-content", DiscardDraftOnLeave: true, SelectedAgentID: "default", DefaultAgentID: projectDefaultAgentID(project), Agents: agents, ShowModelSelector: true,
      ProjectServerOnly: models.IsSharedProjectID(layout.WorkspaceProjectID(ctx, project.ID)),
+     DestinationScope: layout.WorkspaceProjectID(ctx, project.ID),
      ProjectChoices: newTaskProjectChoices(ctx, project), ProjectInputID: "new-task-project",
     })
     @NewTaskOptionsRow()

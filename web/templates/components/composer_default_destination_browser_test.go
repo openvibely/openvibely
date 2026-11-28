@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/internal/remoteid"
 	templateui "github.com/openvibely/openvibely/web/templates"
 	"net/http"
 	"net/http/httptest"
@@ -37,4 +38,35 @@ setTimeout(()=>{try {
 			runHeadlessChromeCDPFixture(t, chrome, srv.URL, "local default", 1200, 900, 10*time.Second)
 		})
 	}
+}
+
+func TestBrowserFunctional_ComposerRemembersDestination(t *testing.T) {
+	chrome := testChromePath(t)
+	remote := remoteid.ID("0123456789abcdef", "project")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var content bytes.Buffer
+		formID := "task-form"
+		if r.URL.Query().Get("chat") == "1" {
+			formID = "chat-form"
+		}
+		if err := ChatInputForm(ChatInputFormConfig{FormID: formID, InputID: "message", PostEndpoint: "/send", TargetID: "messages", ProjectServerOnly: true, DestinationScope: "shared-test", ProjectInputID: "destination", ProjectChoices: []models.Project{{ID: "local", Name: "Repo · This computer"}, {ID: remote, Name: "Remote"}}}).Render(context.Background(), &content); err != nil {
+			t.Error(err)
+			return
+		}
+		fmt.Fprint(w, `<!doctype html><body data-test-result="pending"><input id="destination" value=""><div id="messages"></div>`+content.String()+fmt.Sprintf(`<script>
+setTimeout(()=>{try {
+ const remote=%q, input=document.getElementById('destination');
+ if(location.search.includes('chat=1')) {
+  if(input.value!==remote)throw Error('blank Chat did not restore task destination');
+  document.body.dataset.testResult='pass';return;
+ }
+ if(input.value!=='local')throw Error('initial default not Local');
+ document.querySelector('[data-project-input]').dispatchEvent(new CustomEvent('chat-select-change',{detail:{value:remote}}));
+ if(localStorage.getItem('ov.composer.destination.shared-test')!==remote)throw Error('explicit selection not saved');
+ location.replace('/?chat=1');
+}catch(e){document.body.dataset.testResult='fail';document.body.dataset.testError=e.stack}},200);
+</script>`, remote))
+	}))
+	defer srv.Close()
+	runHeadlessChromeCDPFixture(t, chrome, srv.URL, "remembered destination", 1200, 900, 10*time.Second)
 }
