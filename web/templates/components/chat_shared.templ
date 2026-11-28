@@ -3280,7 +3280,7 @@ templ ChatInputForm(config ChatInputFormConfig) {
                     resumeDestinationSend();
 				});
                 // Run after page-specific destination listeners and draft restoration are installed.
-                setTimeout(function() {
+                function applyDefaultDestination() {
                     if (!form.isConnected || projectInput.value) return;
                     var savedDestination = '';
                     try { if (destinationStorageKey) savedDestination = localStorage.getItem(destinationStorageKey) || ''; } catch (_) {}
@@ -3288,7 +3288,13 @@ templ ChatInputForm(config ChatInputFormConfig) {
                     if (!destination) return;
                     projectInput.value = destination;
                     projectInput.dispatchEvent(new Event('change', {bubbles: true}));
-                });
+                }
+                function scheduleDefaultDestination() { setTimeout(applyDefaultDestination); }
+                if (document.readyState === 'loading') {
+                    document.addEventListener('DOMContentLoaded', scheduleDefaultDestination, {once: true});
+                } else {
+                    scheduleDefaultDestination();
+                }
 
                 // Catalog updates change draft choices, never an existing conversation's owner.
                 var catalogRequest = 0;
