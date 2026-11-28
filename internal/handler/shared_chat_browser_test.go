@@ -54,7 +54,9 @@ func TestSharedProjectChatPickerInChrome(t *testing.T) {
  window.openVibelyNavigate('/chat?project_id=` + url.QueryEscape(shared.ID) + `');
  await wait(()=>document.getElementById('shared-chat-form'));
  const picker=document.getElementById('shared-chat-form-project-select');
- assert(picker && picker.textContent.trim()==='Choose a project','picker missing');
+ assert(picker,'picker missing');
+ await wait(()=>document.getElementById('shared-chat-project').value==='` + localProject.ID + `' && document.getElementById('shared-chat-form').dataset.destinationModelsPending==='false');
+ assert(picker.textContent.trim()==='Local','initial destination should be Local');
  const form=document.getElementById('shared-chat-form');
  const message=document.getElementById('shared-chat-input');
  const stage=document.querySelector('#shared-chat-root [data-thread-empty-stage]');
@@ -74,14 +76,20 @@ func TestSharedProjectChatPickerInChrome(t *testing.T) {
  const sent=[];
  form.addEventListener('htmx:beforeRequest',event=>{if(event.detail.elt!==form)return;event.preventDefault();sent.push(event.detail.requestConfig.path);});
  message.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+ await wait(()=>sent.length===1);
+ assert(sent[0]==='/chat/send?project_id=` + url.QueryEscape(localProject.ID) + `','initial send did not use Local');
+ picker.click();
  const option=id=>document.querySelector('#chat-custom-select-panel li[data-value="'+id+'"]');
  await wait(()=>option('` + remoteCopy + `'));
- assert(sent.length===0,'sent before choosing a copy');
- assert(option('` + localProject.ID + `').textContent.trim()==='This computer','local copy label');
+ assert(sent.length===1,'opening picker submitted another message');
+ assert(option('` + localProject.ID + `').textContent.trim()==='Local','local copy label');
  assert(option('` + remoteCopy + `').textContent.trim()==='Box','remote copy label');
  option('` + remoteCopy + `').click();
- await wait(()=>sent.length===1);
- assert(sent[0]==='/chat/send?project_id=` + url.QueryEscape(remoteCopy) + `','wrong send URL: '+sent[0]);
+ await wait(()=>form.dataset.destinationModelsPending==='false');
+ assert(sent.length===1,'selecting destination submitted a message');
+ message.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+ await wait(()=>sent.length===2);
+ assert(sent[1]==='/chat/send?project_id=` + url.QueryEscape(remoteCopy) + `','wrong send URL: '+sent[1]);
  assert(picker.textContent.trim()==='Box','picker label');
  const xhr={responseText:'<div>ok</div>',status:200,getResponseHeader:()=>null};
  form.dispatchEvent(new CustomEvent('htmx:afterRequest',{bubbles:true,detail:{elt:form,xhr:xhr,successful:true,requestConfig:{}}}));
@@ -90,6 +98,12 @@ func TestSharedProjectChatPickerInChrome(t *testing.T) {
  const regularChatTop=document.getElementById('chat-form').getBoundingClientRect().top;
  assert(Math.abs(regularChatTop-taskTop)<2,'regular Chat composer differs from New Task: '+regularChatTop+' vs '+taskTop);
  assert(document.getElementById('project-selector').value==='` + shared.ID + `','workspace lost shared group');
+ window.openVibelyNavigate('/tasks/new?project_id=` + url.QueryEscape(shared.ID) + `');
+ await wait(()=>document.getElementById('new-task-project')?.value==='` + remoteCopy + `');
+ assert(document.getElementById('task-thread-form-project-select').textContent.trim()==='Box','new task did not remember remote');
+ window.openVibelyNavigate('/chat?project_id=` + url.QueryEscape(shared.ID) + `');
+ await wait(()=>document.getElementById('shared-chat-project')?.value==='` + remoteCopy + `' && document.getElementById('shared-chat-form').dataset.destinationModelsPending==='false');
+ assert(document.getElementById('shared-chat-form-project-select').textContent.trim()==='Box','blank Chat did not remember remote');
  await fetch('/browser-result',{method:'POST',body:'pass'});
  }catch(e){await fetch('/browser-result',{method:'POST',body:String(e.stack||e)+' url='+location.href})}
  })();</script>`
