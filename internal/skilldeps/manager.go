@@ -116,36 +116,11 @@ func (m *Manager) resolve(ctx context.Context, d Dependency) (string, string, er
 		return "", "failed", err
 	}
 
-	entry, _ := installs.LoadOrStore(root, make(chan struct{}, 1))
-	gate := entry.(chan struct{})
-	select {
-	case gate <- struct{}{}:
-		defer func() { <-gate }()
-	case <-ctx.Done():
-		return "", "failed", ctx.Err()
-	}
-	if err := os.MkdirAll(filepath.Dir(root), 0700); err != nil {
-		return "", "failed", err
-	}
-	lock, err := os.OpenFile(root+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	unlock, err := lockCache(ctx, root, true)
 	if err != nil {
 		return "", "failed", err
 	}
-	defer lock.Close()
-	for {
-		ok, err := tryLock(lock)
-		if err != nil {
-			return "", "failed", err
-		}
-		if ok {
-			break
-		}
-		select {
-		case <-ctx.Done():
-			return "", "failed", ctx.Err()
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
+	defer unlock()
 	executable := filepath.Join(root, filepath.FromSlash(p.Executable))
 	if err := cachedHealth(ctx, root, executable, d.HealthCheck); err == nil {
 		return executable, "cached", nil
@@ -220,6 +195,60 @@ func fileHash(path string) (string, error) {
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
+
+// lockCache serializes work on one cache root: the in-process gate first, then
+// the OS lock file. With create false, no directory is made, and a missing
+// directory means no repair has begun, so there is nothing to wait for.
+func lockCache(ctx context.Context, root string, create bool) (func(), error) {
+	entry, _ := installs.LoadOrStore(root, make(chan struct{}, 1))
+	gate := entry.(chan struct{})
+	select {
+	case gate <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	release := func() { <-gate }
+	if create {
+		if err := os.MkdirAll(filepath.Dir(root), 0700); err != nil {
+			release()
+			return nil, err
+		}
+	} else if _, err := os.Stat(filepath.Dir(root)); err != nil {
+		if os.IsNotExist(err) {
+			return release, nil
+		}
+		release()
+		return nil, err
+	}
+	lock, err := os.OpenFile(root+".lock", os.O_CREATE|os.O_RDWR, 0600)
+	if err != nil {
+		release()
+		return nil, err
+	}
+	for {
+		ok, err := tryLock(lock)
+		if err != nil {
+			lock.Close()
+			release()
+			return nil, err
+		}
+		if ok {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			lock.Close()
+			release()
+			return nil, ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return func() {
+		lock.Close()
+		release()
+	}, nil
+}
+
 func cachedHealth(ctx context.Context, root, executable string, args []string) error {
 	if err := inside(root, executable); err != nil {
 		return err
