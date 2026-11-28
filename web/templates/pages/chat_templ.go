@@ -699,6 +699,7 @@ func SharedChatContent(agents []models.LLMConfig, sharedID string, choices []mod
 			ChatMode:          models.ChatModeOrchestrate,
 			ProjectChoices:    choices,
 			ProjectServerOnly: models.IsSharedProjectID(sharedID),
+			DestinationScope:  sharedID,
 			ProjectInputID:    "shared-chat-project",
 			ProjectSendURL:    "/chat/send?project_id=",
 			ProjectOpenURL:    "/chat?project_id=",
