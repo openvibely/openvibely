@@ -311,7 +311,7 @@ func TestSidebar_NavigationHeadingHiddenAndLinksPreserved(t *testing.T) {
 		`data-nav-base="/history"`,
 		`data-nav-base="/analytics"`,
 		`data-nav-base="/alerts"`,
-		`data-nav-base="/themes"`,
+		`data-settings-entry`,
 	}
 	for _, marker := range requiredLinks {
 		if !strings.Contains(html, marker) {

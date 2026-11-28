@@ -337,6 +337,7 @@ templ TaskListPanel(currentProjectID string) {
                 if (!link.matches('[hx-target="#main-content"], [data-settings-back]')) return;
                 // Appearance section selection already updates its existing pane.
                 if (link.matches('[data-settings-link]') && document.getElementById('themes-container')) return;
+                if (link.matches('[data-settings-entry]')) syncSettingsEntry(false);
                 var target = link.matches('[data-settings-back]') ? workspaceURL : link.href;
                 if (!navigateWorkspace(target, true)) return;
                 event.preventDefault();
@@ -413,6 +414,31 @@ templ TaskListPanel(currentProjectID string) {
                     });
                 }
             }, true);
+            // Store only a known settings destination, never another project's URL.
+            function syncSettingsEntry(remember) {
+                var entry = document.querySelector('[data-settings-entry]');
+                var links = Array.from(document.querySelectorAll('#appearance-settings-nav a:not([data-settings-back])'));
+                if (!entry || !links.length) return;
+                function destination(link) {
+                    var url = new URL(link.href, location.href);
+                    return url.pathname + url.hash;
+                }
+                var destinations = links.map(destination);
+                var current = location.pathname + location.hash;
+                if (location.pathname === '/themes' && !location.hash) current += '#themes';
+                if (location.pathname === '/settings/workers') current = '/workers';
+                var saved = '';
+                try {
+                    if (remember && destinations.includes(current)) localStorage.setItem('openvibely.lastSettingsSection', current);
+                    saved = localStorage.getItem('openvibely.lastSettingsSection') || '';
+                } catch (_) {}
+                var target = new URL(destinations.includes(saved) ? saved : destinations[0], location.origin);
+                var projectID = new URLSearchParams(location.search).get('project_id') || (document.getElementById('project-selector') || {}).value || '';
+                target.searchParams.set('project_id', projectID);
+                entry.setAttribute('href', target.pathname + target.search + target.hash);
+                entry.setAttribute('hx-get', target.pathname + target.search + target.hash);
+                if (window.htmx) htmx.process(entry);
+            }
             window.syncAppearanceSettings = function() {
                 if (restoringWorkspace) return;
                 var appearance = !!document.getElementById('themes-container');
@@ -422,6 +448,7 @@ templ TaskListPanel(currentProjectID string) {
                 root.classList.toggle('changes-explorer-active', reviewing);
                 if (window.syncChangesExplorer) window.syncChangesExplorer(reviewing);
                 var settings = appearance || workers || !!document.querySelector('#main-content #servers-container, #main-content #shortcuts-container, #main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #organization-container, #main-content #plugin-settings, #main-content #computer-settings-content, #main-content #update-settings-content');
+                syncSettingsEntry(settings);
                 var active = reviewing || settings;
                 if (active && !inContextSidebar) {
                     wasCollapsed = root.classList.contains('task-list-collapsed');

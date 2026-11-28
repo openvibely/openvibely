@@ -126,7 +126,7 @@ func TestBrowserFunctional_AccountUsageRail(t *testing.T) {
 		b.waitFor("OpenAI meter on startup without AbortSignal.timeout", `String(typeof AbortSignal.timeout==='undefined' && !!document.querySelector('#rail-accounts .rail-account[data-key="personal"] svg'))`, "true")
 		b.waitFor("sorted account rings", `JSON.stringify([...document.querySelectorAll('.rail-account')].map(b=>[b.dataset.key,b.querySelectorAll('circle').length]))`, `[["personal",1],["work",2],["anthropic",2]]`)
 		b.waitFor("weekly ring shows 15 percent remaining", `(()=>{const svg=document.querySelector('[data-key="personal"] svg');return String(Math.round(100*svg.querySelector('path[stroke]').getTotalLength()/svg.querySelector('circle').getTotalLength()))})()`, "15")
-		b.waitFor("standard footer spacing", `String(Math.round(document.querySelector('#sidebar [data-nav-base="/themes"]').getBoundingClientRect().top-document.querySelector('.rail-account:last-child').getBoundingClientRect().bottom))`, "2")
+		b.waitFor("standard footer spacing", `String(Math.round(document.querySelector('#sidebar [data-settings-entry]').getBoundingClientRect().top-document.querySelector('.rail-account:last-child').getBoundingClientRect().bottom))`, "2")
 		b.click(`[data-key="personal"]`)
 		b.waitFor("provider reset", `String(document.querySelector('#rail-account-popup button[data-action="reset-grant"]')!==null)`, "true")
 		b.waitFor("meter popup receives pointer input", `(()=>{const panel=document.getElementById('rail-account-popup'), refresh=panel.querySelector('[data-action="refresh"]'), r=refresh.getBoundingClientRect();return String(panel.parentElement===document.body && refresh.contains(document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)))})()`, "true")
