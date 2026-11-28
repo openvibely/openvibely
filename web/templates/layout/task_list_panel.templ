@@ -439,6 +439,7 @@ templ TaskListPanel(currentProjectID string) {
                 entry.setAttribute('hx-get', target.pathname + target.search + target.hash);
                 if (window.htmx) htmx.process(entry);
             }
+            var lastSettingsVisit = '';
             window.syncAppearanceSettings = function() {
                 if (restoringWorkspace) return;
                 var appearance = !!document.getElementById('themes-container');
@@ -448,7 +449,11 @@ templ TaskListPanel(currentProjectID string) {
                 root.classList.toggle('changes-explorer-active', reviewing);
                 if (window.syncChangesExplorer) window.syncChangesExplorer(reviewing);
                 var settings = appearance || workers || !!document.querySelector('#main-content #servers-container, #main-content #shortcuts-container, #main-content #models-container, #main-content #agents-container, #main-content #skills-container, #main-content #channels-container, #main-content #organization-container, #main-content #plugin-settings, #main-content #computer-settings-content, #main-content #update-settings-content');
-                syncSettingsEntry(settings);
+                // Polling fragments also settle here. Only a change of destination
+                // may replace the preference shared with other browser tabs.
+                var settingsVisit = settings ? location.pathname + location.search + location.hash : '';
+                syncSettingsEntry(settings && settingsVisit !== lastSettingsVisit);
+                lastSettingsVisit = settingsVisit;
                 var active = reviewing || settings;
                 if (active && !inContextSidebar) {
                     wasCollapsed = root.classList.contains('task-list-collapsed');

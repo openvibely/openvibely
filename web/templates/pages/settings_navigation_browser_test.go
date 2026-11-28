@@ -37,6 +37,8 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 			content = UpdateSettingsContent("project", update.CoordinatorSnapshot{AutomaticUpdates: true, AutomaticUpdatesSupported: true}, true, false, "")
 		case "/settings/computer":
 			content = ComputerSettingsContent([]models.Project{{ID: "project", Name: "Project"}}, "project", models.ComputerSettings{Resources: models.DefaultComputerResources(), TimeZone: "UTC", IdleMinutes: 30}, true, false, "")
+		case "/workers/stats/projects":
+			content = ProjectStatsTableBody(5, 1, 1, 0, nil)
 		case "/workers", "/settings/workers":
 			content = WorkerSettingsContent(5, 1, 1, 0, nil, nil)
 		case "/tasks":
@@ -81,6 +83,22 @@ func TestBrowserFunctional_SettingsNavigation(t *testing.T) {
 		b.waitFor("workspace again", `String(!document.documentElement.classList.contains('appearance-settings'))`, "true")
 		b.evaluate(`localStorage.setItem('openvibely.lastSettingsSection','https://example.com/invalid');document.querySelector('[data-settings-entry]').click();'invalid saved section'`)
 		b.waitFor("invalid destination falls back", `String(location.pathname==='/agents' && !!document.getElementById('agents-container'))`, "true")
+		b.waitFor("fallback settled", `String(!document.querySelector('.htmx-settling, .htmx-swapping'))`, "true")
+		b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/workers"]').click();'workers'`)
+		b.waitFor("workers remembered", `localStorage.getItem('openvibely.lastSettingsSection')`, "/workers")
+		// Simulate another tab's selection through a separate same-origin document.
+		b.evaluate(`window.otherSettings=document.createElement('iframe');document.body.appendChild(window.otherSettings);window.otherSettings.contentWindow.localStorage.setItem('openvibely.lastSettingsSection','/themes#layout');'other document selects layout'`)
+		b.waitFor("other document remembers layout", `localStorage.getItem('openvibely.lastSettingsSection')`, "/themes#layout")
+		b.evaluate(`window.otherSettings.remove();window.workerRefreshSettled=false;document.addEventListener('htmx:afterSettle',function onStats(e){if(e.detail.elt.id==='project-stats-tbody'){window.workerRefreshSettled=true;document.removeEventListener('htmx:afterSettle',onStats);}});htmx.ajax('GET','/workers/stats/projects',{target:'#project-stats-tbody',swap:'outerHTML'});'refresh worker stats'`)
+		b.waitFor("worker refresh settles", `String(window.workerRefreshSettled)`, "true")
+		b.waitFor("polling preserves other document selection", `localStorage.getItem('openvibely.lastSettingsSection')`, "/themes#layout")
+		b.evaluate(`document.querySelector('[data-settings-back]').click();'leave workers'`)
+		b.waitFor("left workers", `String(!document.documentElement.classList.contains('appearance-settings'))`, "true")
+		b.evaluate(`document.querySelector('[data-settings-entry]').click();'reopen latest section'`)
+		b.waitFor("latest section reopened", `String(location.hash==='#layout' && !!document.getElementById('themes-container') && !document.querySelector('.htmx-settling, .htmx-swapping'))`, "true")
+		b.evaluate(`document.querySelector('#appearance-settings-nav [data-nav-base="/workers"]').click();'visit workers again'`)
+		b.waitFor("explicit visit remembers workers again", `localStorage.getItem('openvibely.lastSettingsSection')`, "/workers")
+
 	})
 	workspaceRequests.Store(0)
 	runComposerFocusCDP(t, chrome, server.URL+"/tasks", "settings-navigation", func(b *composerFocusCDP) {
