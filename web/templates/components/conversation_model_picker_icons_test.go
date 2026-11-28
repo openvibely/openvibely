@@ -9,14 +9,27 @@ import (
 )
 
 func TestConversationModelPickerIconsCoverAllProviders(t *testing.T) {
-	start := strings.Index(conversationModelPickerIconsJS, "{")
-	end := strings.LastIndex(conversationModelPickerIconsJS, "}")
-	if start < 0 || end <= start {
-		t.Fatal("could not locate JSON object in conversation_model_picker_icons.js")
+	start := strings.Index(conversationModelPickerIconsJS, "var i={")
+	if start < 0 {
+		t.Fatal("could not locate icon map in conversation_model_picker_icons.js")
+	}
+	jsonStart := start + len("var i=")
+	end := strings.Index(conversationModelPickerIconsJS[jsonStart:], "};")
+	if end < 0 {
+		t.Fatal("could not locate end of icon map in conversation_model_picker_icons.js")
 	}
 	var icons map[string]string
-	if err := json.Unmarshal([]byte(conversationModelPickerIconsJS[start:end+1]), &icons); err != nil {
+	if err := json.Unmarshal([]byte(conversationModelPickerIconsJS[jsonStart:jsonStart+end+1]), &icons); err != nil {
 		t.Fatalf("parse icons json: %v", err)
+	}
+	for _, pair := range [][2]string{
+		{"Qwen / DashScope Intl", "Qwen / DashScope"},
+		{"StepFun Step Plan", "StepFun"},
+		{"Tencent TokenHub Intl", "Tencent TokenHub"},
+	} {
+		if strings.Contains(conversationModelPickerIconsJS, `i["`+pair[0]+`"]=i["`+pair[1]+`"]`) {
+			icons[pair[0]] = icons[pair[1]]
+		}
 	}
 	for _, key := range []string{"__pins", "__manage", "__fallback"} {
 		if !strings.Contains(icons[key], "<svg") {

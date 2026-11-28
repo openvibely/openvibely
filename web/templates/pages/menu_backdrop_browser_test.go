@@ -68,20 +68,20 @@ func TestBrowserFunctional_MenuBackdropCornersAndKeyboard(t *testing.T) {
 					b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9, "modifiers": modifiers}, nil)
 					b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Tab", "code": "Tab", "windowsVirtualKeyCode": 9, "modifiers": modifiers}, nil)
 				}
-					for _, provider := range []bool{false, true} {
-						if provider {
-							b.click(`#conversation-model-picker .ov-mp-provider`)
-						}
-						b.evaluate(`window.menuTabs=Array.from(document.querySelectorAll('#conversation-model-picker input,#conversation-model-picker button')).filter(el=>el.tabIndex>=0&&!el.disabled&&el.getClientRects().length&&getComputedStyle(el).visibility==='visible');window.menuTabs.at(-1).focus();'last'`)
-						tab(false)
-						b.waitFor("Tab wraps to first menu control", `String(document.activeElement===window.menuTabs[0] && !document.getElementById('conversation-model-picker').hidden)`, "true")
-						tab(true)
-						b.waitFor("Shift+Tab wraps to last menu control", `String(document.activeElement===window.menuTabs.at(-1))`, "true")
+				for _, provider := range []bool{false, true} {
+					if provider {
+						b.click(`#conversation-model-picker .ov-mp-provider`)
 					}
-					// Escape dismisses the model picker and restores the composer trigger.
-					b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
-					b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Escape"}, nil)
-					b.waitFor("Escape releases boundary and restores focus", `String(document.getElementById('conversation-model-picker').hidden && !document.querySelector('#ov-menu-backdrop')?.getClientRects().length && document.activeElement===document.querySelector('.chat-model-select'))`, "true")
+					b.evaluate(`window.menuTabs=Array.from(document.querySelectorAll('#conversation-model-picker input,#conversation-model-picker button')).filter(el=>el.tabIndex>=0&&!el.disabled&&el.getClientRects().length&&getComputedStyle(el).visibility==='visible');window.menuTabs.at(-1).focus();'last'`)
+					tab(false)
+					b.waitFor("Tab wraps to first menu control", `String(document.activeElement===window.menuTabs[0] && !document.getElementById('conversation-model-picker').hidden)`, "true")
+					tab(true)
+					b.waitFor("Shift+Tab wraps to last menu control", `String(document.activeElement===window.menuTabs.at(-1))`, "true")
+				}
+				// Escape dismisses the model picker and restores the composer trigger.
+				b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Escape"}, nil)
+				b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyUp", "key": "Escape"}, nil)
+				b.waitFor("Escape releases boundary and restores focus", `String(document.getElementById('conversation-model-picker').hidden && !document.querySelector('#ov-menu-backdrop')?.getClientRects().length && document.activeElement===document.querySelector('.chat-model-select'))`, "true")
 				b.click(`#keyboard-background`)
 				b.waitFor("background focus works after dismissal", `String(document.activeElement.id==='keyboard-background')`, "true")
 			})

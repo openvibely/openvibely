@@ -23,6 +23,7 @@
   panel.setAttribute("aria-label", "Choose model");
 
   const rail = el("div", "ov-mp-rail"),
+    railInner = el("div", "ov-mp-rail-inner"),
     railTabs = el("div", "ov-mp-rail-tabs"),
     railFooter = el("div", "ov-mp-rail-footer"),
     manageBtn = el("button", "ov-mp-rail-btn ov-mp-rail-action");
@@ -34,7 +35,8 @@
   manageBtn.title = "Manage models";
   manageBtn.innerHTML = icons.__manage || "";
   railFooter.append(manageBtn);
-  rail.append(railTabs, railFooter);
+  railInner.append(railTabs, railFooter);
+  rail.append(railInner);
 
   const pane = el("div", "ov-mp-pane"),
     searchWrap = el("div", "ov-menu-search ov-mp-search"),
@@ -564,16 +566,21 @@
       star.disabled = favoritesLoading || !!favoritesError;
       star.onclick = () => {
         const endpoint = favoritesURL();
+        const prevStars = [...panel.querySelectorAll(".ov-mp-star")];
+        const prevIndex = prevStars.indexOf(star);
         const desired = !favorites[m.id];
         if (desired) favorites[m.id] = true;
         else delete favorites[m.id];
         renderRail();
         renderList();
         position();
-        const button = [...panel.querySelectorAll(".ov-mp-star")].find(
-          (b) => b.dataset.id === m.id,
-        );
-        button?.focus({ preventScroll: true });
+        const nextStars = [...panel.querySelectorAll(".ov-mp-star")];
+        const focusTarget =
+          nextStars.find((b) => b.dataset.id === m.id) ||
+          nextStars[Math.min(prevIndex, nextStars.length - 1)] ||
+          list.querySelector(".ov-mp-pick") ||
+          search;
+        focusTarget?.focus({ preventScroll: true });
         favoriteWrites = favoriteWrites
           .catch(() => {})
           .then(() =>
@@ -616,12 +623,14 @@
   }
   function syncRailSelection() {
     const searching = search.value.trim().length > 0;
+    let selectedTabID = "";
     railTabs.querySelectorAll(".ov-mp-rail-btn").forEach((b) => {
-      b.setAttribute(
-        "aria-selected",
-        String(!searching && activeTab === b.dataset.tab),
-      );
+      const selected = !searching && activeTab === b.dataset.tab;
+      b.setAttribute("aria-selected", String(selected));
+      if (selected) selectedTabID = b.id;
     });
+    if (selectedTabID) list.setAttribute("aria-labelledby", selectedTabID);
+    else list.removeAttribute("aria-labelledby");
   }
   function renderRail() {
     if (!active) return;
@@ -645,6 +654,7 @@
     railTabs.replaceChildren();
 
     const pinsBtn = el("button", "ov-mp-rail-btn");
+    pinsBtn.id = "ov-mp-tab-pins";
     pinsBtn.type = "button";
     pinsBtn.setAttribute("role", "tab");
     pinsBtn.dataset.tab = "pins";
@@ -656,8 +666,9 @@
     pinsBtn.onclick = () => switchTab("pins", true);
     railTabs.append(pinsBtn);
 
-    listProviders.forEach((p) => {
+    listProviders.forEach((p, idx) => {
       const b = el("button", "ov-mp-rail-btn ov-mp-provider");
+      b.id = "ov-mp-tab-" + idx;
       b.type = "button";
       b.setAttribute("role", "tab");
       b.dataset.tab = p;
@@ -719,7 +730,10 @@
     effortBox.replaceChildren();
     const m = active && current(active);
     effortBox.hidden = !m?.levels.length;
-    if (effortBox.hidden) return;
+    if (effortBox.hidden) {
+      if (!panel.hidden) position();
+      return;
+    }
     const s = state(active),
       override = field(active).value,
       value = override || m.defaultEffort;
@@ -777,6 +791,7 @@
       ticks.append(el("span", "", v ? label(v) : "Default")),
     );
     effortBox.append(head, slider, ticks);
+    if (!panel.hidden) position();
   }
   function renderSpeed() {
     speedBox.replaceChildren();
@@ -1039,7 +1054,10 @@
       }
       if (!active || e.defaultPrevented || e.isComposing || e.keyCode === 229)
         return;
-      if (e.key === "ArrowRight" && document.activeElement?.closest(".ov-mp-rail-tabs")) {
+      if (
+        e.key === "ArrowRight" &&
+        document.activeElement?.closest(".ov-mp-rail")
+      ) {
         const firstPick = list.querySelector(".ov-mp-pick");
         if (firstPick) {
           e.preventDefault();
@@ -1066,6 +1084,16 @@
         !["ArrowDown", "ArrowUp"].includes(e.key)
       )
         return;
+      if (document.activeElement === manageBtn) {
+        const tabs = [...railTabs.querySelectorAll(".ov-mp-rail-btn")];
+        if (!tabs.length) return;
+        e.preventDefault();
+        const targetTab = e.key === "ArrowUp" ? tabs[tabs.length - 1] : tabs[0];
+        targetTab.focus({ preventScroll: true });
+        switchTab(targetTab.dataset.tab, true);
+        targetTab.scrollIntoView({ block: "nearest" });
+        return;
+      }
       if (document.activeElement?.closest(".ov-mp-rail-tabs")) {
         const tabs = [...railTabs.querySelectorAll(".ov-mp-rail-btn")];
         if (!tabs.length) return;

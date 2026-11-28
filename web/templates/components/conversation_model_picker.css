@@ -16,11 +16,18 @@
   display: none !important;
 }
 
-/* Full-height left icon rail for Favorites, providers, and Manage models. */
+/* Full-height left icon rail for Favorites, providers, and Manage models.
+   The inner column is absolutely positioned so many providers scroll inside the
+   rail instead of stretching the menu taller than the right pane. */
 .ov-mp-rail {
+  position: relative;
   width: 46px;
   flex: 0 0 46px;
   border-right: 1px solid var(--ov-border-subtle, #414753);
+}
+.ov-mp-rail-inner {
+  position: absolute;
+  inset: 0;
   padding: 6px 5px;
   display: flex;
   flex-direction: column;

@@ -202,8 +202,10 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
 	 assert(getComputedStyle(slider).getPropertyValue('--ov-mp-track').trim()==='#4b5260','dark track is gray');
 	 slider.value='2';slider.dispatchEvent(new Event('input'));slider.dispatchEvent(new Event('change'));
 	 assert(document.querySelector('[name=reasoning_effort]').value==='high','effort submitted');
+	 const bottomBeforeReset=panel.getBoundingClientRect().bottom;
 	 panel.querySelector('.ov-mp-reset').click();
 	 assert(document.querySelector('[name=reasoning_effort]').value==='','restore model default');
+	 assert(Math.abs(panel.getBoundingClientRect().bottom-bottomBeforeReset)<2,'resetting effort keeps menu anchored above trigger');
 	 assert(panel.getBoundingClientRect().left>=0 && panel.getBoundingClientRect().right<=innerWidth,'panel fits');
 	 search.value='';search.dispatchEvent(new Event('input'));await wait();
 	 const list=panel.querySelector('.ov-mp-list'),railTabs=panel.querySelector('.ov-mp-rail-tabs');
@@ -263,10 +265,33 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
 	   return originalFetch(url,options);
 	 };
 	 panel.querySelector('.ov-mp-star[aria-pressed=true]').click();
+	 assert(panel.contains(document.activeElement),'unfavoriting from Favorites tab retains focus inside picker');
 	 window.ovModelPicker.close(false);trigger.click();
 	 await wait();failFavoriteWrite();await favoritesSettled();
 	 assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===10,'failed write is rolled back from server');
 	 assert([...panel.querySelectorAll('.ov-mp-star')].every(star=>!star.disabled),'successful reopen enables favorites after a pending write fails');
+	 // Keyboard navigation across rail tabs and model list.
+	 const railTab0=panel.querySelector('.ov-mp-rail-btn[data-tab="pins"]');
+	 railTab0.focus();
+	 railTab0.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));
+	 assert(document.activeElement.dataset.provider==='Anthropic'&&list.getAttribute('aria-labelledby')===document.activeElement.id,'ArrowDown moves rail focus and updates tabpanel label');
+	 document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
+	 assert(document.activeElement.classList.contains('ov-mp-pick'),'ArrowRight moves focus from rail into model list');
+	 document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true,cancelable:true}));
+	 assert(document.activeElement.dataset.provider==='Anthropic','ArrowLeft returns focus to active rail tab');
+	 // Adding many providers must scroll inside the left rail without stretching the menu height.
+	 const heightWithTwoProviders=panel.getBoundingClientRect().height;
+	 const optionList=trigger.parentElement.querySelector('ul');
+	 const extraProviders=['Cerebras','DeepInfra','DeepSeek','Fireworks','Google Gemini','Groq','LM Studio','Local vLLM','Mistral','Mixture','Moonshot','NVIDIA NIM','Ollama','OpenRouter','Together'];
+	 const addedOptions=extraProviders.map((p,i)=>{const li=document.createElement('li');li.dataset.value='extra-'+i;li.dataset.pickerName=p+' Model';li.dataset.pickerModel='m-'+i;li.dataset.pickerProvider=p;li.textContent=p+' Model';optionList.append(li);return li;});
+	 window.ovModelPicker.close(false);trigger.click();await favoritesSettled();
+	 const manyRect=panel.getBoundingClientRect();
+	 assert(Math.abs(manyRect.height-heightWithTwoProviders)<2,'many providers do not stretch menu height: '+manyRect.height+' vs '+heightWithTwoProviders);
+	 assert(railTabs.scrollHeight>railTabs.clientHeight,'many providers overflow inside left rail');
+	 railTabs.scrollTop=0;
+	 assert(wheel(railTabs.firstElementChild,80).defaultPrevented&&railTabs.scrollTop>0,'wheel scrolls overflowing 17-provider rail');
+	 addedOptions.forEach(li=>li.remove());
+	 window.ovModelPicker.close(false);trigger.click();await favoritesSettled();
 	 // While favorites are loading, switching tabs manually must not be overridden when favorites finish loading.
 	 let heldFavorites;
 	 const holdNextFavorites=()=>new Promise(r=>{heldFavorites=r;});
