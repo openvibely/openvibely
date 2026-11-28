@@ -3312,6 +3312,26 @@ templ ChatInputForm(config ChatInputFormConfig) {
                         options.innerHTML = source.parentElement.querySelector('.chat-custom-select-options').innerHTML;
                         projectSelect.parentElement.hidden = false;
                         ['placeholder','defaultDestination','localEnabled'].forEach(function(key) { projectSelect.dataset[key] = source.dataset[key]; });
+                        // A blank Chat draft follows the grouped workspace across reopening.
+                        // Update both the DOM key and the keys captured by save/clear handlers.
+                        if (form.id === 'shared-chat-form' && scope !== currentScope) {
+                            var oldAttachmentKey = attachmentStateKey;
+                            var oldPasteKey = pasteKey;
+                            attachmentStateKey = 'openvibely-page-attachments-shared-chat-' + scope;
+                            form.setAttribute('data-attachment-state-key', attachmentStateKey);
+                            window.saveChatPendingAttachmentState(form);
+                            pasteScope = attachmentStateKey;
+                            pasteKey = pasteScope + '-pasted-text';
+                            savePastes();
+                            if (oldAttachmentKey && oldAttachmentKey !== attachmentStateKey) {
+                                delete window._chatPendingAttachmentStates[oldAttachmentKey];
+                                delete window._ovPasteDrafts[oldPasteKey];
+                                try {
+                                    sessionStorage.removeItem(oldAttachmentKey);
+                                    sessionStorage.removeItem(oldPasteKey);
+                                } catch (_) {}
+                            }
+                        }
                         projectSelect.dataset.destinationScope = scope;
                         destinationStorageKey = 'ov.composer.destination.' + scope;
                         projectSelect.setAttribute('aria-label', source.getAttribute('aria-label'));

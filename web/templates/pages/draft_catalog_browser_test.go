@@ -50,6 +50,10 @@ func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 					return
 				}
 				if r.URL.Query().Get("project_id") == group.ID {
+					if r.URL.Path == "/chat" {
+						_ = SharedChat(projects, group.ID, nil, projects).Render(layout.WithSharedProjects(ctx, []layout.SharedProject{group}), w)
+						return
+					}
 					ctx = templateui.WithProjectNames(ctx, projects)
 					_ = NewTaskContent(&models.Project{ID: group.ID}, nil, nil, projects...).Render(ctx, w)
 					return
@@ -79,6 +83,10 @@ func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 				if scenario.dirty {
 					b.evaluate(`document.querySelector('textarea[name="message"]').value='keep this draft';'typed'`)
 				}
+				attachmentCase := chat && !scenario.remote && scenario.dirty
+				if attachmentCase {
+					b.evaluate(`var f=document.getElementById('shared-chat-form');var k=f.dataset.attachmentStateKey;sessionStorage.setItem(k,JSON.stringify({sessionID:'draft-upload',projectID:'local-one',attachments:[{filename:'screenshot.png',size:12,media_type:'image/png',session_id:'draft-upload'}]}));window.restoreChatPendingAttachmentState(f);'attached'`)
+				}
 				b.evaluate(`window.dispatchEvent(new Event('openvibely-servers-changed'));'sent'`)
 				b.waitFor("picker updated", `String(document.querySelector('[data-project-input]').dataset.destinationScope==='__repo_1234567890abcdef' && !document.querySelector('[data-project-input]').parentElement.hidden)`, "true")
 				b.waitFor("shared picker visible", `String(document.querySelector('[data-project-input]').getClientRects().length > 0)`, "true")
@@ -95,6 +103,11 @@ func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 				b.waitFor("destination preserved or defaulted", fmt.Sprintf(`String(document.getElementById(document.querySelector('[data-project-input]').dataset.projectInput).value===%q)`, expected), "true")
 				if scenario.dirty {
 					b.waitFor("text preserved", `document.querySelector('textarea[name="message"]').value`, "keep this draft")
+				}
+				if attachmentCase {
+					b.waitFor("attachment draft migrated", `String(!!sessionStorage.getItem('openvibely-page-attachments-shared-chat-__repo_1234567890abcdef') && !sessionStorage.getItem('openvibely-page-attachments-shared-chat-local-one'))`, "true")
+					b.call("Page.navigate", map[string]any{"url": server.URL + "/chat?project_id=" + group.ID}, nil)
+					b.waitFor("attachment restored after reopening", `String(!!document.querySelector('#shared-chat-form[data-attachment-state-key="openvibely-page-attachments-shared-chat-__repo_1234567890abcdef"] [data-pending-attachment-filename="screenshot.png"]'))`, "true")
 				}
 				if !chat {
 					b.waitFor("details updated", `String(!document.querySelector('[data-detail-property="destination_project"]').hidden && document.querySelector('[data-detail-property="destination_project"] span').textContent==='Server:')`, "true")
