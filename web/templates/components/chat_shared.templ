@@ -1712,12 +1712,12 @@ templ ChatInputForm(config ChatInputFormConfig) {
 								data-project-input={ config.ProjectInputID }
 								data-project-send-url={ config.ProjectSendURL }
 								data-project-open-url={ config.ProjectOpenURL }
-								data-placeholder="Choose a project"
+								data-placeholder={ composerDestinationPrompt(config.ProjectServerOnly) }
 								data-current-value=""
-								aria-label="Project"
+								aria-label={ composerDestinationPrompt(config.ProjectServerOnly) }
 								aria-haspopup="listbox"
 								aria-expanded="false"
-							><span class="chat-custom-select-label truncate flex-1 min-w-0 pointer-events-none">Choose a project</span><svg class="flex-shrink-0 pointer-events-none" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
+							><span class="chat-custom-select-label truncate flex-1 min-w-0 pointer-events-none">{ composerDestinationPrompt(config.ProjectServerOnly) }</span><svg class="flex-shrink-0 pointer-events-none" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg></button>
 							<ul class="chat-custom-select-options" aria-hidden="true" style="display:none">
 								for _, project := range config.ProjectChoices {
 									<li data-value={ project.ID }><span data-server-icon class="inline-flex shrink-0 [&_svg]:w-4 [&_svg]:h-4">@templateui.ProjectServerIcon(ctx, project.ID)</span>{ composerDestinationLabel(ctx, project, config.ProjectServerOnly) }</li>
@@ -7732,4 +7732,9 @@ func composerDestinationLabel(ctx context.Context, project models.Project, serve
   }
  }
  return project.Name
+}
+
+func composerDestinationPrompt(serverOnly bool) string {
+ if serverOnly { return "Select a server" }
+ return "Choose a project"
 }
