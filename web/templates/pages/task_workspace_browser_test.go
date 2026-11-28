@@ -174,6 +174,8 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.waitFor("existing None tag is highlighted", `document.querySelector('#task-property-picker [data-active]')?.dataset.value || ''`, "None")
 		setSearch(" Docs/Security ")
 		b.waitFor("new tag can be added after refresh", addVisible, "true")
+		b.waitFor("no divider below lone Add action", `getComputedStyle(document.querySelector('#task-property-picker .ov-menu-create-row')).borderBottomWidth`, "0px")
+
 		b.call("Input.dispatchKeyEvent", map[string]any{"type": "keyDown", "key": "Enter"}, nil)
 		b.waitFor("draft custom tag", `document.querySelector('[data-draft-property="tag"]').value`, "Docs/Security")
 		b.waitFor("draft custom tag uses primary badge", `document.querySelector('[data-tag-badge].badge-primary [data-property-label]')?.textContent`, "Docs/Security")
@@ -299,12 +301,16 @@ func TestBrowserFunctional_TaskDetailPropertyEditors(t *testing.T) {
 		b.click(`[data-detail-property="tag"]`)
 		b.typeText(" Docs/Security ")
 		b.waitFor("new tag can be added after refresh", addVisible, "true")
+		b.waitFor("no divider below lone Add action", `getComputedStyle(document.querySelector('#task-property-picker .ov-menu-create-row')).borderBottomWidth`, "0px")
+
 		b.click(`[data-custom-tag]`)
 		b.waitFor("saved custom tag", `document.querySelector('[data-detail-property="tag"]').dataset.value`, "Docs/Security")
 		b.waitFor("custom tag uses primary badge", `document.querySelector('[data-tag-badge].badge-primary [data-property-label]').textContent`, "Docs/Security")
 		b.click(tagArrow)
 		setSearch(strings.Repeat("x", 65))
 		b.waitFor("new tag can be added after refresh", addVisible, "true")
+		b.waitFor("no divider below lone Add action", `getComputedStyle(document.querySelector('#task-property-picker .ov-menu-create-row')).borderBottomWidth`, "0px")
+
 		b.click(`[data-custom-tag]`)
 		b.waitFor("tag validation visible", `String(document.querySelector('#task-property-picker [data-property-error]').textContent.includes('64 characters'))`, "true")
 		setSearch("")
