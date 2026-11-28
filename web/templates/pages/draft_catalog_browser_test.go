@@ -15,9 +15,15 @@ import (
 
 func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 	chrome := chatNavigationChromePath(t)
-	for _, scenario := range []struct{ chat, remote, dirty, remembered, pending bool }{{false, false, true, false, false}, {true, false, true, false, false}, {false, true, false, false, false}, {true, true, false, false, false}, {false, true, true, false, false}, {true, true, true, false, false}, {false, false, false, true, false}, {true, false, false, true, false}, {true, false, true, false, true}} {
+	for _, scenario := range []struct{ chat, remote, dirty, remembered, pending, pasted bool }{
+		{dirty: true}, {chat: true, dirty: true}, {remote: true}, {chat: true, remote: true},
+		{remote: true, dirty: true}, {chat: true, remote: true, dirty: true},
+		{remembered: true}, {chat: true, remembered: true}, {chat: true, dirty: true, pending: true},
+		{remote: true, pasted: true}, {chat: true, remote: true, pasted: true},
+		{remembered: true, pasted: true}, {chat: true, remembered: true, pasted: true},
+	} {
 		chat := scenario.chat
-		t.Run(fmt.Sprint("chat=", chat, "/remote=", scenario.remote, "/dirty=", scenario.dirty, "/remembered=", scenario.remembered, "/pending=", scenario.pending), func(t *testing.T) {
+		t.Run(fmt.Sprint("chat=", chat, "/remote=", scenario.remote, "/dirty=", scenario.dirty, "/remembered=", scenario.remembered, "/pending=", scenario.pending, "/pasted=", scenario.pasted), func(t *testing.T) {
 			projects := []models.Project{{ID: "local-one", Name: "Foo"}, {ID: "r-1234567890abcdef-remote-one", Name: "Foo"}}
 			initial := 0
 			if scenario.remote {
@@ -83,6 +89,10 @@ func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 				if scenario.dirty {
 					b.evaluate(`document.querySelector('textarea[name="message"]').value='keep this draft';'typed'`)
 				}
+				if scenario.pasted {
+					b.evaluate(`var dt=new DataTransfer();dt.setData('text/plain','keep this pasted draft '.repeat(300));document.querySelector('textarea[name="message"]').dispatchEvent(new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true}));'pasted'`)
+					b.waitFor("pasted card created with empty message", `String(document.querySelector('[data-pasted-text-cards]').children.length === 1 && document.querySelector('textarea[name="message"]').value === '')`, "true")
+				}
 				attachmentCase := chat && !scenario.remote && scenario.dirty
 				if attachmentCase {
 					b.evaluate(`var f=document.getElementById('shared-chat-form');var k=f.dataset.attachmentStateKey;sessionStorage.setItem(k,JSON.stringify({sessionID:'draft-upload',projectID:'local-one',attachments:[{filename:'screenshot.png',size:12,media_type:'image/png',session_id:'draft-upload'}]}));window.restoreChatPendingAttachmentState(f);'attached'`)
@@ -103,12 +113,17 @@ func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 				if scenario.remembered {
 					expected = projects[1].ID
 				}
-				if scenario.dirty {
+				if scenario.dirty || scenario.pasted {
 					expected = projects[initial].ID
 				}
 				b.waitFor("destination preserved or defaulted", fmt.Sprintf(`String(document.getElementById(document.querySelector('[data-project-input]').dataset.projectInput).value===%q)`, expected), "true")
 				if scenario.dirty {
 					b.waitFor("text preserved", `document.querySelector('textarea[name="message"]').value`, "keep this draft")
+				}
+				if scenario.pasted {
+					b.waitFor("pasted card preserved", `String(document.querySelector('[data-pasted-text-cards]').children.length === 1)`, "true")
+					b.evaluate(`document.querySelector('[data-pasted-text-cards] .ov-paste-show').click();'expanded'`)
+					b.waitFor("pasted content preserved", `String(document.querySelector('textarea[name="message"]').value === 'keep this pasted draft '.repeat(300))`, "true")
 				}
 				if attachmentCase {
 					b.waitFor("attachment draft migrated", `String(!!sessionStorage.getItem('openvibely-page-attachments-shared-chat-__repo_1234567890abcdef') && !sessionStorage.getItem('openvibely-page-attachments-shared-chat-local-one'))`, "true")
