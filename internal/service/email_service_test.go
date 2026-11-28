@@ -3671,3 +3671,25 @@ func TestEmailService_QueuedChatAttachmentStoresPendingSession(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, entries, 1, "exactly one staged attachment expected")
 }
+
+func TestReadEmailParts_DecodesWindows1252BodyBeforeAttachment(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("Content-Type: multipart/mixed; boundary=BOUND\r\n\r\n")
+	b.WriteString("--BOUND\r\n")
+	b.WriteString("Content-Type: text/plain; charset=windows-1252\r\n")
+	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
+	b.WriteString("Please review the caf=E9 menu.\r\n")
+	b.WriteString("--BOUND\r\n")
+	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
+	b.WriteString("Content-Disposition: attachment; filename=\"menu.txt\"\r\n")
+	b.WriteString("Content-Transfer-Encoding: base64\r\n\r\n")
+	b.WriteString(base64.StdEncoding.EncodeToString([]byte("menu contents")) + "\r\n")
+	b.WriteString("--BOUND--\r\n")
+
+	mr, err := messagemail.CreateReader(strings.NewReader(b.String()))
+	require.NoError(t, err)
+	body, attachments := readEmailParts(mr, false)
+	require.Equal(t, "Please review the café menu.", body)
+	require.Len(t, attachments, 1)
+	require.Equal(t, "menu.txt", attachments[0].FileName)
+}
