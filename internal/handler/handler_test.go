@@ -5668,7 +5668,7 @@ func TestSidebar_SyncsActiveNavigationMetadata(t *testing.T) {
 	for _, snippet := range []string{
 		`function syncSidebarActiveNavigation()`,
 		`link.setAttribute('aria-current', 'page');`,
-		`data-nav-base="/themes"`,
+		`data-nav-base="/settings"`,
 	} {
 		if !strings.Contains(body, snippet) {
 			t.Fatalf("sidebar active navigation metadata missing snippet: %s", snippet)

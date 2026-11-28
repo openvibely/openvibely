@@ -97,7 +97,7 @@ async function until(fn,label){for(let i=0;i<600;i++){if(fn())return;await wait(
  await until(()=>location.pathname===%q && new URL(location.href).searchParams.get('project_id')===%q,'returned URL');
  await until(()=>view()?.dataset.taskStatus==='completed','completed status');
  await until(()=>messages()?.textContent.includes('LATEST COMPLETED ANSWER'),'latest answer rendered');
- await wait(300);
+ await until(()=>messages() && !messages().hasAttribute('data-transcript-hydrating') && getComputedStyle(messages()).visibility==='visible' && messages().scrollHeight-messages().scrollTop-messages().clientHeight<20,'returned transcript settled');
  const pair=messages().querySelector('[data-execution-pair][data-exec-id="%s"]');
  assert(pair && pair.dataset.execStatus==='completed','current execution missing or stale '+debug());
  assert(getComputedStyle(messages()).visibility==='visible','hidden transcript '+debug());

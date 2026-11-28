@@ -533,11 +533,9 @@
     return providers(all).includes(m.provider) ? m.provider : "pins";
   }
   function scrollSelectedIntoView() {
-    railTabs
-      .querySelector('.ov-mp-rail-btn[aria-selected="true"]')
-      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    window.openVibelyScrollIntoPanel?.(railTabs.querySelector('.ov-mp-rail-btn[aria-selected="true"]'));
     const selectedRow = list.querySelector('.ov-mp-row[data-selected="true"]');
-    if (selectedRow) selectedRow.scrollIntoView({ block: "nearest" });
+    if (selectedRow) window.openVibelyScrollIntoPanel?.(selectedRow);
     else list.scrollTop = 0;
   }
   function switchTab(tab, clearSearch = false) {
@@ -1097,7 +1095,7 @@
         const targetTab = e.key === "ArrowUp" ? tabs[tabs.length - 1] : tabs[0];
         targetTab.focus({ preventScroll: true });
         switchTab(targetTab.dataset.tab, true);
-        targetTab.scrollIntoView({ block: "nearest" });
+        window.openVibelyScrollIntoPanel?.(targetTab);
         return;
       }
       if (document.activeElement?.closest(".ov-mp-rail-tabs")) {
@@ -1113,7 +1111,7 @@
                 : i - 1;
         tabs[next].focus({ preventScroll: true });
         switchTab(tabs[next].dataset.tab, true);
-        tabs[next].scrollIntoView({ block: "nearest" });
+        window.openVibelyScrollIntoPanel?.(tabs[next]);
         return;
       }
       const rows = [...list.querySelectorAll(".ov-mp-pick")];
@@ -1129,7 +1127,7 @@
       rows[next].focus({ preventScroll: true });
       if (window.openVibelyScrollIntoPanel)
         window.openVibelyScrollIntoPanel(rows[next]);
-      else rows[next].scrollIntoView({ block: "nearest" });
+
     },
     true,
   );

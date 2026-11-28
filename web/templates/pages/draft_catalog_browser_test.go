@@ -37,6 +37,7 @@ func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 					return
 				}
 				if r.URL.Path == "/wails/runtime.js" {
+					w.Header().Set("Content-Type", "application/javascript")
 					fmt.Fprint(w, `export const Window={};`)
 					return
 				}
@@ -78,7 +79,7 @@ func TestBrowserFunctional_DraftCatalogReconnect(t *testing.T) {
 				path = "/chat"
 			}
 			runComposerFocusCDP(t, chrome, server.URL+path+"?project_id="+projects[initial].ID, "draft-catalog", func(b *composerFocusCDP) {
-				b.waitFor("composer ready", `String(!!document.querySelector('[data-project-input]'))`, "true")
+				b.waitFor("composer ready", `String(!!document.querySelector('[data-project-input]') && typeof window.restoreChatPendingAttachmentState === 'function')`, "true")
 				b.waitFor("single-server picker hidden", `String(document.querySelector('[data-project-input]').getClientRects().length === 0)`, "true")
 				if !chat {
 					b.click("#task-details-opener")

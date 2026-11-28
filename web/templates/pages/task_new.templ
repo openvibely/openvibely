@@ -178,7 +178,11 @@ templ NewTaskContent(project *models.Project, agents []models.LLMConfig, agentDe
       root.querySelectorAll('[name="reasoning_effort"], [name="service_tier"]').forEach(function(field) { field.value = ''; });
       picker.disabled = true;
       picker.querySelector('.chat-custom-select-label').textContent = destination.value ? 'Loading models…' : 'Choose a project';
-      if (!destination.value) return;
+      if (!destination.value) {
+       form.dataset.destinationModelsPending = 'false';
+       if (send) send.disabled = form.dataset.destinationAttachmentsPending === 'true' || form.dataset.destinationCatalogPending === 'true';
+       return;
+      }
       try {
        var response = await fetch('/tasks/new?model_options=1&project_id=' + encodeURIComponent(destination.value));
        if (!response.ok) throw new Error('Could not load models');

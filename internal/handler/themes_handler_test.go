@@ -19,7 +19,7 @@ func TestThemesFullPageResponse(t *testing.T) {
 	for _, fragment := range []string{
 		`<title>Appearance - OpenVibely</title>`,
 		`id="themes-container"`,
-		`data-nav-base="/themes"`,
+		`data-nav-base="/settings"`,
 		`href="/themes?project_id=`,
 		`data-color-theme=`,
 		`id="ov-theme-catalog"`,

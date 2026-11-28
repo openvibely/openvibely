@@ -27,7 +27,7 @@ func TestPluginSidebarLoadsEnabledPagesBrowser(t *testing.T) {
  try{
  if(document.readyState==='loading')await new Promise(r=>document.addEventListener('DOMContentLoaded',r,{once:true}));
  const checkSettings=()=>{
-  if(document.querySelector('#sidebar [data-nav-base="/themes"]').getAttribute('aria-current')!=='page')throw Error('Settings rail highlight missing');
+  if(document.querySelector('#sidebar [data-nav-base="/settings"]').getAttribute('aria-current')!=='page')throw Error('Settings rail highlight missing');
   if(!document.documentElement.classList.contains('appearance-settings'))throw Error('Settings navigation reverted to tasks');
   if(document.getElementById('task-list-panel').getAttribute('aria-label')!=='Settings')throw Error('Wrong navigation context');
  };

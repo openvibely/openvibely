@@ -121,10 +121,10 @@ func TestSharedProjectAcrossMachines(t *testing.T) {
 	require.Equal(t, http.StatusOK, chat.Code, chat.Body.String())
 	require.Contains(t, chat.Body.String(), `id="shared-chat-form-project-select"`)
 	for id, label := range map[string]string{
-		localProject.ID:                         "This computer",
+		localProject.ID:                         "Local",
 		remoteid.ID(serverID, remoteProject.ID): "Box",
 	} {
-		_, after, found := strings.Cut(chat.Body.String(), `<li data-value="`+id+`">`)
+		_, after, found := strings.Cut(chat.Body.String(), `<li data-value="`+id+`"`)
 		require.True(t, found, "missing destination %s", id)
 		option, _, closed := strings.Cut(after, "</li>")
 		require.True(t, closed)

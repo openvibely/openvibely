@@ -3268,7 +3268,16 @@ templ ChatInputForm(config ChatInputFormConfig) {
 					projectInput.dispatchEvent(new Event('change', {bubbles: true}));
 					if (!projectSendPending) return;
 					projectSendPending = false;
-					submitComposer(normalPostEndpoint, 'normal');
+                    var sendDestination = projectInput.value;
+                    var readyObserver = new MutationObserver(resumeDestinationSend);
+                    function resumeDestinationSend() {
+                        if (!form.isConnected || projectInput.value !== sendDestination) { readyObserver.disconnect(); return; }
+                        if (form.dataset.destinationCatalogPending === 'true' || form.dataset.destinationModelsPending === 'true' || form.dataset.destinationAttachmentsPending === 'true') return;
+                        readyObserver.disconnect();
+                        submitComposer(normalPostEndpoint, 'normal');
+                    }
+                    readyObserver.observe(form, {attributes:true, attributeFilter:['data-destination-catalog-pending', 'data-destination-models-pending', 'data-destination-attachments-pending']});
+                    resumeDestinationSend();
 				});
                 // Run after page-specific destination listeners and draft restoration are installed.
                 setTimeout(function() {

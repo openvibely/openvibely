@@ -161,7 +161,7 @@ func TestAllProjectsDesktopLaunchKeepsRestorationBootstrap(t *testing.T) {
 	require.Empty(t, rec.Header().Get("Location"), "the original launch URL must reach the shell's saved-location/outbox restoration")
 	require.Contains(t, rec.Body.String(), `data-openvibely-runtime="desktop"`)
 	require.Contains(t, rec.Body.String(), `/analytics?project_id=__all_projects__&amp;range=7d#usage`)
-	require.Contains(t, rec.Body.String(), `id="chat-form"`)
+	require.Contains(t, rec.Body.String(), `id="shared-chat-form"`)
 }
 
 func TestAllProjectsTaskWorkspaceKeepsOwnerForEdits(t *testing.T) {
