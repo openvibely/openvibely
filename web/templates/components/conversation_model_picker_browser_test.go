@@ -114,190 +114,179 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
    assert(!picker.hidden && document.activeElement===picker.querySelector('input'),'focus model search on '+platform);
    assert(trigger.getAttribute('aria-keyshortcuts')===(mac?'Meta+M':'Control+M'),'platform shortcut accessibility hint');
    assert(trigger.title===(mac?'Models (⌘M)':'Models (Ctrl+M)'),'platform tooltip');
-   assert(shortcut({metaKey:mac,ctrlKey:!mac}).defaultPrevented,'consume repeated shortcut on '+platform);
-   assert(picker.hidden && document.getElementById('conversation-provider-models').hidden && document.activeElement===trigger && trigger.getAttribute('aria-expanded')==='false','shortcut closes picker and restores trigger focus on '+platform);
-   assert(shortcut({metaKey:mac,ctrlKey:!mac}).defaultPrevented && !picker.hidden && document.activeElement===picker.querySelector('input'),'shortcut reopens picker on '+platform);
-   window.ovModelPicker.close(false);
-   if(originalPlatform)Object.defineProperty(navigator,'platform',originalPlatform);else delete navigator.platform;
-   if(originalData)Object.defineProperty(navigator,'userAgentData',originalData);else delete navigator.userAgentData;
- }
- trigger.click();await wait();await favoritesLoaded();
- const panel=document.getElementById('conversation-model-picker'),sub=document.getElementById('conversation-provider-models');
- assert(!panel.hidden,'picker opens');
- assert(sub.hidden,'picker opens without a provider submenu');
- assert(panel.querySelectorAll('.ov-mp-provider').length===2,'provider groups');
- const providers=[...panel.querySelectorAll('.ov-mp-provider')];
- const originalLeft=panel.getBoundingClientRect().left;
- const originalTriggerRect=trigger.getBoundingClientRect.bind(trigger);
- trigger.getBoundingClientRect=()=>{const r=originalTriggerRect();return {...r,left:r.left-2};};
- providers[0].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
- assert(!sub.hidden && sub.getAttribute('aria-label')===providers[0].dataset.provider+' models','hover opens provider submenu');
- const firstRect=providers[0].getBoundingClientRect(),secondRect=providers[1].getBoundingClientRect();
- providers[0].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse',clientX:firstRect.left+35,clientY:firstRect.top+12}));
- providers[1].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse',clientX:secondRect.right-12,clientY:secondRect.top+12}));
- assert(sub.getAttribute('aria-label')===providers[0].dataset.provider+' models','diagonal travel keeps current submenu open');
- sub.dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));await new Promise(r=>setTimeout(r,350));
- assert(sub.getAttribute('aria-label')===providers[0].dataset.provider+' models','entering submenu cancels provider switch');
- providers[1].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse',clientX:secondRect.right-12,clientY:secondRect.top+12}));
- await new Promise(r=>setTimeout(r,350));
- assert(sub.getAttribute('aria-label')===providers[1].dataset.provider+' models','staying on another provider switches submenu');
- providers[0].click();
- assert(panel.getBoundingClientRect().left===originalLeft,'provider submenu does not move the original picker');
- trigger.getBoundingClientRect=originalTriggerRect;
- providers[0].click();
- assert(!sub.hidden,'click keeps hovered provider open');
- providers[1].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
- assert(sub.getAttribute('aria-label')===providers[1].dataset.provider+' models','hover switches provider submenu');
- providers[0].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
- assert(!sub.hidden && sub.querySelectorAll('.ov-mp-pick').length===12,'provider submenu');
- assert(sub.querySelector('.ov-mp-subhead').hidden,'no redundant submenu heading');
- const row=sub.querySelector('.ov-mp-row');
- assert(row.firstElementChild.classList.contains('ov-mp-pick')&&row.firstElementChild.firstElementChild.classList.contains('ov-mp-copy')&&row.lastElementChild.classList.contains('ov-mp-star'),'text starts at normal inset, favorite on right');
- row.dispatchEvent(new PointerEvent('pointermove'));
- assert(row.hasAttribute('data-picker-active'),'hover activates model row');
- document.documentElement.style.setProperty('--bc','0.8 0 0');
- document.documentElement.style.setProperty('--shell-row-selected','rgb(40, 45, 55)');
- const hoverColor=getComputedStyle(row).backgroundColor;
- const originalSelected=row.dataset.selected;row.dataset.selected='true';
- assert(getComputedStyle(row).backgroundColor==='rgb(40, 45, 55)'&&hoverColor!==getComputedStyle(row).backgroundColor,'selection uses task-list color and remains distinct from hover');
- row.dataset.selected=originalSelected;
+	   assert(shortcut({metaKey:mac,ctrlKey:!mac}).defaultPrevented,'consume repeated shortcut on '+platform);
+	   assert(picker.hidden && document.activeElement===trigger && trigger.getAttribute('aria-expanded')==='false','shortcut closes picker and restores trigger focus on '+platform);
+	   assert(shortcut({metaKey:mac,ctrlKey:!mac}).defaultPrevented && !picker.hidden && document.activeElement===picker.querySelector('input'),'shortcut reopens picker on '+platform);
+	   window.ovModelPicker.close(false);
+	   if(originalPlatform)Object.defineProperty(navigator,'platform',originalPlatform);else delete navigator.platform;
+	   if(originalData)Object.defineProperty(navigator,'userAgentData',originalData);else delete navigator.userAgentData;
+	 }
+	 trigger.click();await wait();await favoritesLoaded();
+	 const panel=document.getElementById('conversation-model-picker');
+	 assert(!panel.hidden,'picker opens');
+	 assert(!document.getElementById('conversation-provider-models'),'unified left-rail picker omits detached submenu');
+	 assert(panel.querySelectorAll('.ov-mp-provider').length===2,'provider rail icons');
+	 const providers=[...panel.querySelectorAll('.ov-mp-provider')];
+	 assert(providers.every(b=>!!b.querySelector('svg')),'every provider rail icon renders an SVG');
+	 assert(!!panel.querySelector('.ov-mp-rail-action svg'),'manage models rail action renders an SVG');
+	 // Active model m0 (OpenAI) is not favorited yet, so opening shows OpenAI with m0 selected.
+	 assert(panel.querySelector('.ov-mp-provider[data-provider="OpenAI"]').getAttribute('aria-selected')==='true','unfavorited active model opens on its provider tab');
+	 assert(panel.querySelector('.ov-mp-pick[data-model="m0"]').closest('.ov-mp-row').dataset.selected==='true','active model visible and marked selected');
+	 const originalLeft=panel.getBoundingClientRect().left;
+	 const originalTriggerRect=trigger.getBoundingClientRect.bind(trigger);
+	 trigger.getBoundingClientRect=()=>{const r=originalTriggerRect();return {...r,left:r.left-2};};
+	 // Hovering a provider icon immediately switches the right-side model list without clicking.
+	 providers[0].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
+	 assert(panel.querySelector('.ov-mp-provider[data-provider="Anthropic"]').getAttribute('aria-selected')==='true','hover activates Anthropic rail icon');
+	 assert(panel.querySelectorAll('.ov-mp-pick').length===12,'Anthropic provider lists its 12 models');
+	 assert(panel.getBoundingClientRect().left===originalLeft,'switching providers does not shift picker');
+	 trigger.getBoundingClientRect=originalTriggerRect;
+	 const anthStarRight=panel.querySelector('.ov-mp-star').getBoundingClientRect().right;
+	 const pinsBtn=panel.querySelector('.ov-mp-rail-btn[data-tab="pins"]');
+	 pinsBtn.dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
+	 assert(pinsBtn.getAttribute('aria-selected')==='true','hover switches to Favorites rail icon');
+	 assert(panel.querySelectorAll('.ov-mp-pick').length===2,'Favorites without pins shows Auto and Default');
+	 assert(!panel.querySelector('.ov-mp-heading'),'no redundant section headings');
+	 // Switch back to Anthropic and verify row structure, hover highlight, and reserved scrollbar width.
+	 providers[0].dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
+	 const row=panel.querySelector('.ov-mp-row');
+	 assert(row.firstElementChild.classList.contains('ov-mp-pick')&&row.firstElementChild.firstElementChild.classList.contains('ov-mp-copy')&&row.lastElementChild.classList.contains('ov-mp-star'),'text starts at normal inset, favorite on right');
+	 row.dispatchEvent(new PointerEvent('pointermove'));
+	 assert(row.hasAttribute('data-picker-active'),'hover activates model row');
+	 document.documentElement.style.setProperty('--bc','0.8 0 0');
+	 document.documentElement.style.setProperty('--shell-row-selected','rgb(40, 45, 55)');
+	 const hoverColor=getComputedStyle(row).backgroundColor;
+	 const originalSelected=row.dataset.selected;row.dataset.selected='true';
+	 assert(getComputedStyle(row).backgroundColor==='rgb(40, 45, 55)'&&hoverColor!==getComputedStyle(row).backgroundColor,'selection uses task-list color and remains distinct from hover');
+	 row.dataset.selected=originalSelected;
 
- const hoverObserver=new MutationObserver(()=>{});hoverObserver.observe(sub,{attributes:true,subtree:true,attributeFilter:['data-picker-active']});
- for(let i=0;i<10;i++)row.dispatchEvent(new PointerEvent('pointermove'));
- assert(hoverObserver.takeRecords().length===0,'moving within model row does not rewrite highlight');hoverObserver.disconnect();
+	 const hoverObserver=new MutationObserver(()=>{});hoverObserver.observe(panel,{attributes:true,subtree:true,attributeFilter:['data-picker-active']});
+	 for(let i=0;i<10;i++)row.dispatchEvent(new PointerEvent('pointermove'));
+	 assert(hoverObserver.takeRecords().length===0,'moving within model row does not rewrite highlight');hoverObserver.disconnect();
 
- const next=row.nextElementSibling;next.dispatchEvent(new PointerEvent('pointermove'));
- assert(!row.hasAttribute('data-picker-active')&&next.hasAttribute('data-picker-active'),'hover moves highlight');
- sub.querySelector('.ov-mp-star').click();
- assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===1,'favorite moved to main panel');
- assert(sub.querySelectorAll('.ov-mp-pick').length===11,'favorite not duplicated');
- const menuRows=[...panel.querySelector('.ov-mp-list').children];
- const lastProvider=menuRows.findLastIndex(e=>e.classList.contains('ov-mp-provider'));
- const autoIndex=menuRows.findIndex(e=>e.querySelector('[data-model="auto"]'));
- const defaultIndex=menuRows.findIndex(e=>e.querySelector('[data-model="default"]'));
- const favoritesIndex=menuRows.findIndex(e=>e.classList.contains('ov-mp-heading'));
- assert(lastProvider<autoIndex&&autoIndex<defaultIndex&&defaultIndex<favoritesIndex&&menuRows.at(-1).querySelector('.ov-mp-star'),'providers then Auto/Default then favorites nearest effort');
- const hover=(target)=>target.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,pointerType:'mouse'}));
- const reopen=()=>panel.querySelector('.ov-mp-provider').dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
- hover(panel.querySelector('.ov-mp-list'));assert(!sub.hidden,'crossing list padding keeps submenu open');
- sub.dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
- await new Promise(r=>setTimeout(r,400));assert(!sub.hidden,'entering submenu cancels delayed close');
- hover(sub.querySelector('.ov-mp-row'));assert(!sub.hidden,'moving into submenu keeps it open');
- panel.querySelector('.ov-mp-provider').dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerType:'mouse'}));
- assert(panel.querySelector('[data-picker-active]'),'provider hover highlights row');
- hover(panel.querySelector('.ov-mp-search input'));assert(sub.hidden,'search hover closes submenu');
- assert(!panel.querySelector('[data-picker-active]'),'search hover clears row highlight');reopen();
- hover(panel.querySelector('.ov-mp-star[aria-pressed=true]'));assert(sub.hidden,'favorite hover closes submenu');reopen();
- hover(panel.querySelector('.ov-mp-pick[data-model="auto"]'));assert(sub.hidden,'Auto hover closes submenu');reopen();
- hover(panel.querySelector('.ov-mp-pick[data-model="default"]'));assert(sub.hidden,'Default hover closes submenu');reopen();
- panel.querySelector('.ov-mp-provider').dispatchEvent(new PointerEvent('pointermove',{bubbles:true,pointerType:'mouse'}));
- hover(panel.querySelector('.ov-mp-effort'));assert(sub.hidden,'effort hover closes submenu');
- assert(!panel.querySelector('[data-picker-active]'),'effort hover clears row highlight');reopen();
- hover(panel.querySelector('.ov-mp-heading'));assert(!sub.hidden,'heading does not close submenu during travel');
- await new Promise(r=>setTimeout(r,400));assert(sub.hidden,'submenu closes when pointer stays on heading');reopen();
- hover(panel.querySelector('.ov-mp-list'));await new Promise(r=>setTimeout(r,400));
- assert(sub.hidden,'submenu closes when pointer stays on list padding');reopen();
- hover(panel.querySelector('.ov-mp-list'));reopen();
- await new Promise(r=>setTimeout(r,400));assert(!sub.hidden,'returning to provider cancels delayed close');
- hover(panel.querySelector('.ov-mp-provider'));assert(!sub.hidden,'provider hover keeps submenu open');
- const search=panel.querySelector('input');search.value='Configuration 23';search.dispatchEvent(new Event('input'));
- assert(sub.hidden && panel.querySelectorAll('.ov-mp-pick').length===1,'search all providers');
- panel.querySelector('.ov-mp-pick').click();
- assert(!panel.hidden && trigger.dataset.currentValue==='m23','select keeps picker open');
- await trigger._ovModelState.ready;
- const slider=panel.querySelector('input[type=range]');
- document.documentElement.dataset.theme='light';
- assert(getComputedStyle(slider).getPropertyValue('--ov-mp-track').trim()==='#d5d8df','light track is light gray');
- const accent=getComputedStyle(slider).getPropertyValue('--ov-mp-accent');
- slider.value='1';slider.dispatchEvent(new Event('input'));
- assert(panel.querySelector('.ov-mp-effort-head').textContent==='Reasoning effortUse default','no repeated level and reset keeps its action label');
- assert(getComputedStyle(slider).getPropertyValue('--ov-mp-accent')===accent,'adjustment keeps same accent');
- document.documentElement.dataset.theme='dark';
- assert(getComputedStyle(slider).getPropertyValue('--ov-mp-track').trim()==='#4b5260','dark track is gray');
- slider.value='2';slider.dispatchEvent(new Event('input'));slider.dispatchEvent(new Event('change'));
- assert(document.querySelector('[name=reasoning_effort]').value==='high','effort submitted');
- panel.querySelector('.ov-mp-reset').click();
- assert(document.querySelector('[name=reasoning_effort]').value==='','restore model default');
- assert(panel.getBoundingClientRect().left>=0 && panel.getBoundingClientRect().right<=innerWidth,'panel fits');
- search.value='';search.dispatchEvent(new Event('input'));await wait();
- const list=panel.querySelector('.ov-mp-list');
- assert(!panel.querySelector('.ov-mp-scroll-hints'),'no more-above/below controls');
- assert(list.offsetWidth===list.clientWidth,'no scrollbar when models fit');
- list.style.maxHeight='75px';await wait();
- assert(list.scrollHeight>list.clientHeight&&list.offsetWidth>list.clientWidth,'visible scrollbar when overflowing');
- list.scrollTop=0;
- const wheel=(target,dy,extra={})=>{const e=new WheelEvent('wheel',{deltaY:dy,bubbles:true,cancelable:true,...extra});target.dispatchEvent(e);return e;};
- assert(wheel(list.firstElementChild,50).defaultPrevented&&list.scrollTop>0,'wheel on model row scrolls overflowing favorites');
- assert(wheel(list,-50).defaultPrevented&&list.scrollTop===0,'wheel scrolls back to first model');
- wheel(list,2,{deltaMode:1});assert(list.scrollTop===32,'line-mode wheel units');
- assert(!wheel(list,50,{ctrlKey:true}).defaultPrevented&&list.scrollTop===32,'preserve zoom gestures');
- assert(!wheel(list,5,{deltaX:60}).defaultPrevented&&list.scrollTop===32,'preserve horizontal gestures');
- wheel(list,1,{deltaMode:2});assert(list.scrollTop>32,'page-mode wheel units');
- assert(!panel.querySelector('.ov-mp-effort').hidden,'effort stays accessible while list scrolls');
- list.style.maxHeight='';await wait();
- const defaultRow=panel.querySelector('.ov-mp-pick[data-model=default]');
- assert(defaultRow.querySelector('.ov-mp-name').textContent==='Default'&&defaultRow.querySelector('.ov-mp-detail').textContent==='OpenAI · gpt-5.5','global default uses provider and model subtext');
- defaultRow.click();await trigger._ovModelState.ready;
- assert(trigger.dataset.currentValue==='default'&&!panel.querySelector('.ov-mp-effort').hidden,'global default exposes effort without changing selection');
- const defaultSlider=panel.querySelector('input[type=range]');defaultSlider.value='2';defaultSlider.dispatchEvent(new Event('input'));
- assert(document.querySelector('[name=agent_id]').value==='default'&&document.querySelector('[name=reasoning_effort]').value==='high','global default sends selected effort');
- trigger.scrollIntoView({block:'end'});await nextFrame();
- [...panel.querySelectorAll('.ov-mp-provider')].find(b=>b.dataset.provider==='OpenAI').click();
- for(let i=0;i<8;i++){
-   sub.querySelector('.ov-mp-star').click();
-   const bounds=panel.getBoundingClientRect();
-   assert(bounds.top>=8&&bounds.bottom<=innerHeight-8,'favorite growth keeps primary menu in viewport: '+JSON.stringify({top:bounds.top,bottom:bounds.bottom,height:innerHeight,trigger:trigger.getBoundingClientRect().top}));
-   assert(bounds.bottom<=trigger.getBoundingClientRect().top,'favorite growth keeps menu anchored above trigger');
- }
- for(let i=0;i<40;i++) { const saved=await (await fetch('/ui/model-favorites')).json(); if(Object.keys(saved).length===9) break; await wait(); }
- const favoritesSettled=async()=>{for(let i=0;i<200&&panel.querySelector('.ov-mp-star:disabled');i++)await wait();};
- window.ovModelPicker.close(false);localStorage.clear();trigger.click();await favoritesSettled();
- assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===9,'favorites load from server after local storage is cleared');
- window.ovModelPicker.close(false);localStorage.setItem('openvibely-model-favorites',JSON.stringify({m10:true}));trigger.click();await favoritesSettled();
- assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===10,'legacy browser favorite merges into shared list');
- assert(localStorage.getItem('openvibely-model-favorites')===null,'legacy favorite is removed after import');
- const originalFetch=window.fetch.bind(window);let failFavoriteWrite;
- window.fetch=(url,options)=>{
-   if(url==='/ui/model-favorites'&&options?.method==='POST'){
-     window.fetch=originalFetch;
-     return new Promise(resolve=>{failFavoriteWrite=()=>resolve(new Response('',{status:500}));});
-   }
-   return originalFetch(url,options);
- };
- panel.querySelector('.ov-mp-star[aria-pressed=true]').click();
- window.ovModelPicker.close(false);trigger.click();
- await wait();failFavoriteWrite();await favoritesSettled();
- assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===10,'failed write is rolled back from server');
- assert([...panel.querySelectorAll('.ov-mp-star')].every(star=>!star.disabled),'successful reopen enables favorites after a pending write fails');
- const atFavoritesEnd=()=>Math.abs(list.scrollHeight-list.clientHeight-list.scrollTop)<2;
- list.style.maxHeight='120px';list.scrollTop=0;
- window.ovModelPicker.close(false);trigger.click();await favoritesSettled();
- assert(list.scrollHeight>list.clientHeight&&atFavoritesEnd(),'overflowing picker opens at favorites end');
- let heldFavorites;
- const holdNextFavorites=()=>new Promise(r=>{heldFavorites=r;});
- window.fetch=async(url,options)=>{
-   const response=await originalFetch(url,options);
-   if(url==='/ui/model-favorites'&&!options){
-     const saved=await response.json();saved.m12=true;
-     return new Promise(resolve=>heldFavorites(()=>resolve(new Response(JSON.stringify(saved),{status:200}))));
-   }
-   return response;
- };
- let finishFavorites=holdNextFavorites();
- window.ovModelPicker.close(false);trigger.click();await wait();
- assert(atFavoritesEnd(),'cached favorites visible while loading');
- (await finishFavorites)();await wait();
- assert(atFavoritesEnd(),'loading additional saved favorites keeps bottom visible');
- finishFavorites=holdNextFavorites();
- window.ovModelPicker.close(false);trigger.click();await wait();list.scrollTop=0;
- (await finishFavorites)();await wait();
- assert(list.scrollTop===0,'loading favorites does not undo user scrolling toward providers');
- window.fetch=originalFetch;list.style.maxHeight='';
+	 const next=row.nextElementSibling;next.dispatchEvent(new PointerEvent('pointermove'));
+	 assert(!row.hasAttribute('data-picker-active')&&next.hasAttribute('data-picker-active'),'hover moves highlight');
+	 const hover=(target)=>target.dispatchEvent(new PointerEvent('pointerover',{bubbles:true,pointerType:'mouse'}));
+	 hover(panel.querySelector('.ov-mp-search input'));
+	 assert(!panel.querySelector('[data-picker-active]'),'search hover clears row highlight');
+	 next.dispatchEvent(new PointerEvent('pointermove'));
+	 hover(panel.querySelector('.ov-mp-effort'));
+	 assert(!panel.querySelector('[data-picker-active]'),'effort hover clears row highlight');
+	 // Pin an Anthropic model; it stays in Anthropic (marked favorited) and appears on top in Favorites.
+	 panel.querySelector('.ov-mp-star').click();
+	 assert(panel.querySelectorAll('.ov-mp-pick').length===12,'favorited model remains listed in its provider tab');
+	 assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===1,'favorite star updated in provider tab');
+	 pinsBtn.dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
+	 const favStarRight=panel.querySelector('.ov-mp-star').getBoundingClientRect().right;
+	 assert(Math.abs(favStarRight-anthStarRight)<0.5,'reserved scrollbar gutter keeps stars aligned between scrolling and non-scrolling lists');
+	 const menuRows=[...panel.querySelector('.ov-mp-list').children];
+	 const firstFavIndex=menuRows.findIndex(e=>e.querySelector('.ov-mp-star[aria-pressed=true]'));
+	 const autoIndex=menuRows.findIndex(e=>e.querySelector('[data-model="auto"]'));
+	 const defaultIndex=menuRows.findIndex(e=>e.querySelector('[data-model="default"]'));
+	 assert(firstFavIndex===0&&firstFavIndex<autoIndex&&autoIndex<defaultIndex,'Favorites tab puts pinned models on top above Auto and Default');
+	 // Search across all providers.
+	 const search=panel.querySelector('input');search.value='Configuration 23';search.dispatchEvent(new Event('input'));
+	 assert(panel.querySelectorAll('.ov-mp-pick').length===1,'search all providers');
+	 panel.querySelector('.ov-mp-pick').click();
+	 assert(!panel.hidden && trigger.dataset.currentValue==='m23','select keeps picker open');
+	 await trigger._ovModelState.ready;
+	 const slider=panel.querySelector('input[type=range]');
+	 document.documentElement.dataset.theme='light';
+	 assert(getComputedStyle(slider).getPropertyValue('--ov-mp-track').trim()==='#d5d8df','light track is light gray');
+	 const accent=getComputedStyle(slider).getPropertyValue('--ov-mp-accent');
+	 assert(panel.querySelector('.ov-mp-effort-head').hidden,'effort header hidden without override (no Reasoning effort label)');
+	 slider.value='1';slider.dispatchEvent(new Event('input'));
+	 assert(!panel.querySelector('.ov-mp-effort-head').hidden && panel.querySelector('.ov-mp-effort-head').textContent==='Use default','reset keeps its action label without Reasoning effort heading');
+	 assert(getComputedStyle(slider).getPropertyValue('--ov-mp-accent')===accent,'adjustment keeps same accent');
+	 document.documentElement.dataset.theme='dark';
+	 assert(getComputedStyle(slider).getPropertyValue('--ov-mp-track').trim()==='#4b5260','dark track is gray');
+	 slider.value='2';slider.dispatchEvent(new Event('input'));slider.dispatchEvent(new Event('change'));
+	 assert(document.querySelector('[name=reasoning_effort]').value==='high','effort submitted');
+	 panel.querySelector('.ov-mp-reset').click();
+	 assert(document.querySelector('[name=reasoning_effort]').value==='','restore model default');
+	 assert(panel.getBoundingClientRect().left>=0 && panel.getBoundingClientRect().right<=innerWidth,'panel fits');
+	 search.value='';search.dispatchEvent(new Event('input'));await wait();
+	 const list=panel.querySelector('.ov-mp-list'),railTabs=panel.querySelector('.ov-mp-rail-tabs');
+	 assert(!panel.querySelector('.ov-mp-scroll-hints'),'no more-above/below controls');
+	 // Test WebKit wheel scrolling on both the model list and the left rail.
+	 list.style.maxHeight='75px';await wait();
+	 assert(list.scrollHeight>list.clientHeight&&list.offsetWidth>list.clientWidth,'visible scrollbar when overflowing');
+	 list.scrollTop=0;
+	 const wheel=(target,dy,extra={})=>{const e=new WheelEvent('wheel',{deltaY:dy,bubbles:true,cancelable:true,...extra});target.dispatchEvent(e);return e;};
+	 assert(wheel(list.firstElementChild,50).defaultPrevented&&list.scrollTop>0,'wheel on model row scrolls overflowing list');
+	 assert(wheel(list,-50).defaultPrevented&&list.scrollTop===0,'wheel scrolls back to first model');
+	 wheel(list,2,{deltaMode:1});assert(list.scrollTop===32,'line-mode wheel units');
+	 assert(!wheel(list,50,{ctrlKey:true}).defaultPrevented&&list.scrollTop===32,'preserve zoom gestures');
+	 assert(!wheel(list,5,{deltaX:60}).defaultPrevented&&list.scrollTop===32,'preserve horizontal gestures');
+	 wheel(list,1,{deltaMode:2});assert(list.scrollTop>32,'page-mode wheel units');
+	 assert(!panel.querySelector('.ov-mp-effort').hidden,'effort stays accessible while list scrolls');
+	 list.style.maxHeight='';await wait();
+	 railTabs.style.maxHeight='50px';railTabs.scrollTop=0;await wait();
+	 assert(railTabs.scrollHeight>railTabs.clientHeight,'rail overflows when constrained');
+	 assert(wheel(railTabs.firstElementChild,40).defaultPrevented&&railTabs.scrollTop>0,'wheel on rail icon scrolls overflowing left rail');
+	 assert(wheel(railTabs,-40).defaultPrevented&&railTabs.scrollTop===0,'wheel scrolls left rail back to top');
+	 railTabs.style.maxHeight='';await wait();
+	 // Default option lives in Favorites tab and exposes effective model effort.
+	 pinsBtn.click();
+	 const defaultRow=panel.querySelector('.ov-mp-pick[data-model=default]');
+	 assert(defaultRow.querySelector('.ov-mp-name').textContent==='Default'&&defaultRow.querySelector('.ov-mp-detail').textContent==='OpenAI · gpt-5.5','global default uses provider and model subtext');
+	 defaultRow.click();await trigger._ovModelState.ready;
+	 assert(trigger.dataset.currentValue==='default'&&!panel.querySelector('.ov-mp-effort').hidden,'global default exposes effort without changing selection');
+	 const defaultSlider=panel.querySelector('input[type=range]');defaultSlider.value='2';defaultSlider.dispatchEvent(new Event('input'));
+	 assert(document.querySelector('[name=agent_id]').value==='default'&&document.querySelector('[name=reasoning_effort]').value==='high','global default sends selected effort');
+	 trigger.scrollIntoView({block:'end'});await nextFrame();
+	 panel.querySelector('.ov-mp-provider[data-provider="OpenAI"]').click();
+	 for(let i=0;i<8;i++){
+	   const unpinned=panel.querySelector('.ov-mp-star[aria-pressed=false]');
+	   unpinned.click();
+	   const bounds=panel.getBoundingClientRect();
+	   assert(bounds.top>=8&&bounds.bottom<=innerHeight-8,'favorite growth keeps primary menu in viewport: '+JSON.stringify({top:bounds.top,bottom:bounds.bottom,height:innerHeight,trigger:trigger.getBoundingClientRect().top}));
+	   assert(bounds.bottom<=trigger.getBoundingClientRect().top,'favorite growth keeps menu anchored above trigger');
+	 }
+	 for(let i=0;i<40;i++) { const saved=await (await fetch('/ui/model-favorites')).json(); if(Object.keys(saved).length===9) break; await wait(); }
+	 const favoritesSettled=async()=>{for(let i=0;i<200&&panel.querySelector('.ov-mp-star:disabled');i++)await wait();};
+	 window.ovModelPicker.close(false);localStorage.clear();trigger.click();await favoritesSettled();
+	 assert(panel.querySelector('.ov-mp-rail-btn[data-tab="pins"]').getAttribute('aria-selected')==='true','reopening with Default opens Favorites tab');
+	 assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===9,'favorites load from server after local storage is cleared');
+	 // Select a favorited model (m0) and verify reopen opens on Favorites with m0 visible.
+	 panel.querySelector('.ov-mp-pick[data-model="m0"]').click();await trigger._ovModelState.ready;
+	 window.ovModelPicker.close(false);localStorage.setItem('openvibely-model-favorites',JSON.stringify({m10:true}));trigger.click();await favoritesSettled();
+	 assert(panel.querySelector('.ov-mp-rail-btn[data-tab="pins"]').getAttribute('aria-selected')==='true','reopening with favorited model opens Favorites tab');
+	 assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===10,'legacy browser favorite merges into shared list');
+	 assert(localStorage.getItem('openvibely-model-favorites')===null,'legacy favorite is removed after import');
+	 const originalFetch=window.fetch.bind(window);let failFavoriteWrite;
+	 window.fetch=(url,options)=>{
+	   if(url==='/ui/model-favorites'&&options?.method==='POST'){
+	     window.fetch=originalFetch;
+	     return new Promise(resolve=>{failFavoriteWrite=()=>resolve(new Response('',{status:500}));});
+	   }
+	   return originalFetch(url,options);
+	 };
+	 panel.querySelector('.ov-mp-star[aria-pressed=true]').click();
+	 window.ovModelPicker.close(false);trigger.click();
+	 await wait();failFavoriteWrite();await favoritesSettled();
+	 assert(panel.querySelectorAll('.ov-mp-star[aria-pressed=true]').length===10,'failed write is rolled back from server');
+	 assert([...panel.querySelectorAll('.ov-mp-star')].every(star=>!star.disabled),'successful reopen enables favorites after a pending write fails');
+	 // While favorites are loading, switching tabs manually must not be overridden when favorites finish loading.
+	 let heldFavorites;
+	 const holdNextFavorites=()=>new Promise(r=>{heldFavorites=r;});
+	 window.fetch=async(url,options)=>{
+	   const response=await originalFetch(url,options);
+	   if(url==='/ui/model-favorites'&&!options){
+	     const saved=await response.json();saved.m13=true;
+	     return new Promise(resolve=>heldFavorites(()=>resolve(new Response(JSON.stringify(saved),{status:200}))));
+	   }
+	   return response;
+	 };
+	 let finishFavorites=holdNextFavorites();
+	 window.ovModelPicker.close(false);trigger.click();await wait();
+	 panel.querySelector('.ov-mp-provider[data-provider="Anthropic"]').dispatchEvent(new PointerEvent('pointerenter',{pointerType:'mouse'}));
+	 (await finishFavorites)();await wait();
+	 assert(panel.querySelector('.ov-mp-provider[data-provider="Anthropic"]').getAttribute('aria-selected')==='true','loading favorites does not override user tab switch');
+	 window.fetch=originalFetch;
 
- document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
- document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
- assert(panel.hidden,'escape closes');
- document.body.setAttribute('data-test-result','pass');
+	 document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+	 assert(panel.hidden,'escape closes unified picker in one press'); document.body.setAttribute('data-test-result','pass');
  }catch(e){document.body.setAttribute('data-test-result','fail');document.body.setAttribute('data-test-error',e.stack);document.getElementById('browser-result').textContent=String(e);}
  })();</script></body></html>`)
 	}))
@@ -352,19 +341,16 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  const slider=panel.querySelector('input[type=range]');slider.value='2';slider.dispatchEvent(new Event('input'));slider.dispatchEvent(new Event('change'));await trigger._ovModelState.pending;
  assert(stored.b==='high'&&stored.a==='high','persist override for selected configuration');
  choose('c');await trigger._ovModelState.ready;assert(panel.querySelector('.ov-mp-effort').hidden&&effort.value==='','unsupported model has no slider or stale effort');
- // Selecting from a provider keeps the selected row visible even without effort controls.
- const search=panel.querySelector('input');search.value='';search.dispatchEvent(new Event('input'));
- [...panel.querySelectorAll('.ov-mp-provider')].find(b=>b.dataset.provider==='Ollama').click();
- const sub=document.getElementById('conversation-provider-models');
- sub.querySelector('[data-model=c]').click();await trigger._ovModelState.ready;
- assert(!sub.hidden && sub.querySelector('[data-model=c]').getAttribute('aria-pressed')==='true','selected model remains visible without effort');
- assert(sub.querySelector('[data-model=c]').closest('.ov-mp-row').dataset.selected==='true'&&!sub.querySelector('.ov-mp-check'),'selected row without checkmark or effort');
- window.ovModelPicker.close(false);trigger.click();
- assert(sub.hidden,'reopen without automatically opening selected provider');
- [...panel.querySelectorAll('.ov-mp-provider')].find(b=>b.dataset.provider==='Ollama').click();
- assert(!sub.hidden && sub.querySelector('[data-model=c]').getAttribute('aria-pressed')==='true','selected model remains marked when provider opens');
- assert(panel.getBoundingClientRect().right<=innerWidth,'small viewport bounds');
- failNextRead=true;choose('b');await trigger._ovModelState.ready;
+	 // Selecting from a provider keeps the selected row visible even without effort controls.
+	 const search=panel.querySelector('input');search.value='';search.dispatchEvent(new Event('input'));
+	 [...panel.querySelectorAll('.ov-mp-provider')].find(b=>b.dataset.provider==='Ollama').click();
+	 panel.querySelector('[data-model=c]').click();await trigger._ovModelState.ready;
+	 assert(panel.querySelector('[data-model=c]').getAttribute('aria-pressed')==='true','selected model remains visible without effort');
+	 assert(panel.querySelector('[data-model=c]').closest('.ov-mp-row').dataset.selected==='true'&&!panel.querySelector('.ov-mp-check'),'selected row without checkmark or effort');
+	 window.ovModelPicker.close(false);trigger.click();
+	 assert(panel.querySelector('.ov-mp-provider[data-provider="Ollama"]').getAttribute('aria-selected')==='true','reopen shows unfavorited active model provider tab');
+	 assert(panel.querySelector('[data-model=c]').getAttribute('aria-pressed')==='true','selected model remains marked on reopen');
+	 assert(panel.getBoundingClientRect().right<=innerWidth,'small viewport bounds'); failNextRead=true;choose('b');await trigger._ovModelState.ready;
  assert(!!trigger._ovModelState.error,'lookup failure shown');
  window.ovModelPicker.close(false);trigger.click();await trigger._ovModelState.ready;
  assert(!trigger._ovModelState.error&&posts.at(-1)==='b','lookup retry persists pending selection');
@@ -422,10 +408,10 @@ func TestBrowserFunctional_TaskModelPickerPersistence(t *testing.T) {
  await wait(150);
  assert(loadingSend?.get('agent_id')==='a'&&loadingSend?.get('reasoning_effort')==='medium','send uses loaded effort even when model changes during lookup');
  assert(modelInput.value==='b'&&effort.value==='high','lookup does not undo later model selection');
- search.value='';search.dispatchEvent(new Event('input'));
- const defaultRow=panel.querySelector('.ov-mp-pick[data-model=default]');
- assert(defaultRow,'clearing search restores the default option');
- assert(defaultRow.querySelector('.ov-mp-name').textContent==='Default'&&defaultRow.querySelector('.ov-mp-detail').textContent==='OpenAI · gpt-5.5','project default uses provider and model subtext');
+	 search.value='';search.dispatchEvent(new Event('input'));
+	 panel.querySelector('.ov-mp-rail-btn[data-tab="pins"]').click();
+	 const defaultRow=panel.querySelector('.ov-mp-pick[data-model=default]');
+	 assert(defaultRow,'Favorites tab exposes the default option'); assert(defaultRow.querySelector('.ov-mp-name').textContent==='Default'&&defaultRow.querySelector('.ov-mp-detail').textContent==='OpenAI · gpt-5.5','project default uses provider and model subtext');
  defaultRow.click();await trigger._ovModelState.ready;
  assert(modelInput.value==='default'&&effort.value==='high'&&!panel.querySelector('.ov-mp-effort').hidden,'default keeps its selection and loads project model effort');
  const defaultSlider=panel.querySelector('input[type=range]');defaultSlider.value='1';defaultSlider.dispatchEvent(new Event('input'));defaultSlider.dispatchEvent(new Event('change'));

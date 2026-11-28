@@ -7,7 +7,7 @@
   const selector = [
     '.dropdown > .dropdown-content', '[data-menu-content]',
     '[data-menu-submenu-portaled="true"]',
-    '#conversation-model-picker', '#conversation-provider-models',
+    '#conversation-model-picker',
     '#chat-custom-select-panel', '#project-tab-menu',
     '.inspector-picker', '.schedule-datetime-popup',
     '#rail-account-popup', '#rail-overflow', '#plugin-pages-overflow-menu',

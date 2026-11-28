@@ -63,7 +63,7 @@
    distinct from pointer/keyboard navigation, including on the selected row. */
 .ov-menu :is([data-searchable-selector-option], [data-breadcrumb-selector-option], [data-project-selector-option]):is(:hover, [data-selector-active]),
 .ov-menu .ov-mp-row:is(:hover, [data-picker-active]),
-.ov-menu .ov-mp-provider:is(:hover, [data-picker-active]),
+.ov-menu .ov-mp-rail-btn:hover,
 .ov-menu :is(.ov-menu-choice, :where(.inspector-picker [data-options]:not(.ov-menu-create-row)) > button[data-value]):not(:disabled):is(:hover, :focus-visible, [data-active]),
 .ov-menu.ov-menu-actions > li > .ov-menu-choice:not(:disabled):is(:hover, :focus-visible) {
   background: var(--ov-menu-active);
@@ -71,7 +71,7 @@
 @supports (color: oklch(0 0 0)) {
   .ov-menu :is([data-searchable-selector-option], [data-breadcrumb-selector-option], [data-project-selector-option]):is(:hover, [data-selector-active]),
   .ov-menu .ov-mp-row:is(:hover, [data-picker-active]),
-  .ov-menu .ov-mp-provider:is(:hover, [data-picker-active]),
+  .ov-menu .ov-mp-rail-btn:hover,
   .ov-menu :is(.ov-menu-choice, :where(.inspector-picker [data-options]:not(.ov-menu-create-row)) > button[data-value]):not(:disabled):is(:hover, :focus-visible, [data-active]),
   .ov-menu.ov-menu-actions > li > .ov-menu-choice:not(:disabled):is(:hover, :focus-visible) {
     background: oklch(var(--bc) / .06);
@@ -79,6 +79,7 @@
 }
 .ov-menu :is([data-breadcrumb-selector-option], [data-project-selector-option])[aria-selected="true"],
 .ov-menu .ov-mp-row[data-selected="true"],
+.ov-menu .ov-mp-rail-btn[aria-selected="true"],
 .ov-menu :is(.ov-menu-choice, :where(.inspector-picker [data-options]:not(.ov-menu-create-row)) > button[data-value]):not(:disabled)[aria-pressed="true"],
 .ov-menu.ov-menu-actions > li > .ov-menu-choice[aria-pressed="true"] {
   background: var(--ov-menu-active);
@@ -86,6 +87,7 @@
 @supports (color: color-mix(in srgb, oklch(0 0 0) 10%, transparent)) {
   .ov-menu :is([data-breadcrumb-selector-option], [data-project-selector-option])[aria-selected="true"],
   .ov-menu .ov-mp-row[data-selected="true"],
+  .ov-menu .ov-mp-rail-btn[aria-selected="true"],
   .ov-menu :is(.ov-menu-choice, :where(.inspector-picker [data-options]:not(.ov-menu-create-row)) > button[data-value]):not(:disabled)[aria-pressed="true"],
   .ov-menu.ov-menu-actions > li > .ov-menu-choice[aria-pressed="true"] {
     background: var(--shell-row-selected, color-mix(in srgb, oklch(var(--bc)) 10%, transparent));

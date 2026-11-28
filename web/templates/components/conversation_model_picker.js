@@ -2,6 +2,7 @@
   "use strict";
   if (window.ovModelPicker) return;
   const favoritesKey = "openvibely-model-favorites";
+  const icons = window._ovModelProviderIcons || {};
   const read = (key) => {
     try {
       return JSON.parse(localStorage.getItem(key) || "{}");
@@ -15,17 +16,28 @@
     if (text !== undefined) e.textContent = text;
     return e;
   };
-  const panel = el("div", "ov-menu ov-model-picker"),
-    sub = el("div", "ov-menu ov-model-submenu");
+  const panel = el("div", "ov-menu ov-model-picker");
   panel.id = "conversation-model-picker";
   panel.hidden = true;
   panel.setAttribute("role", "dialog");
   panel.setAttribute("aria-label", "Choose model");
-  sub.hidden = true;
-  sub.id = "conversation-provider-models";
-  sub.setAttribute("role", "dialog");
-  sub.setAttribute("aria-label", "Provider models");
-  const searchWrap = el("div", "ov-menu-search ov-mp-search"),
+
+  const rail = el("div", "ov-mp-rail"),
+    railTabs = el("div", "ov-mp-rail-tabs"),
+    railFooter = el("div", "ov-mp-rail-footer"),
+    manageBtn = el("button", "ov-mp-rail-btn ov-mp-rail-action");
+  railTabs.setAttribute("role", "tablist");
+  railTabs.setAttribute("aria-orientation", "vertical");
+  railTabs.setAttribute("aria-label", "Favorites and providers");
+  manageBtn.type = "button";
+  manageBtn.setAttribute("aria-label", "Manage models");
+  manageBtn.title = "Manage models";
+  manageBtn.innerHTML = icons.__manage || "";
+  railFooter.append(manageBtn);
+  rail.append(railTabs, railFooter);
+
+  const pane = el("div", "ov-mp-pane"),
+    searchWrap = el("div", "ov-menu-search ov-mp-search"),
     search = el("input"),
     clear = el("button", "ov-mp-clear", "×");
   search.placeholder = "Search models…";
@@ -33,55 +45,69 @@
   clear.type = "button";
   clear.setAttribute("aria-label", "Clear search");
   searchWrap.append(search, clear);
+
   const list = el("div", "ov-menu-list ov-menu-scroll ov-mp-list"),
     effortBox = el("div", "ov-mp-effort"),
+    speedBox = el("div", "ov-mp-speed"),
     status = el("div", "ov-mp-status");
-  status.setAttribute("role", "status");
-  const speedBox = el("div", "ov-mp-speed");
+  list.setAttribute("role", "tabpanel");
   speedBox.hidden = true;
-  panel.append(searchWrap, list, effortBox, speedBox, status);
-  const subhead = el("div", "ov-mp-subhead"),
-    back = el("button", "ov-mp-back", "‹"),
-    sublist = el("div", "ov-menu-list ov-menu-scroll ov-mp-sublist");
-  back.type = "button";
-  back.setAttribute("aria-label", "Back to providers");
+  status.setAttribute("role", "status");
+
   // WebKit can miss native wheel scrolling in floating menus. Keep vertical
-  // gestures inside the model lists, including when they reach either end.
-  for (const scrollList of [list, sublist]) {
-    scrollList.addEventListener("wheel", (event) => {
-      if (event.ctrlKey || event.metaKey || !event.deltaY ||
+  // gestures inside both the model list and the icon rail, including at ends.
+  for (const scrollList of [list, railTabs]) {
+    scrollList.addEventListener(
+      "wheel",
+      (event) => {
+        if (
+          event.ctrlKey ||
+          event.metaKey ||
+          !event.deltaY ||
           Math.abs(event.deltaX) > Math.abs(event.deltaY) ||
-          scrollList.scrollHeight <= scrollList.clientHeight) return;
-      const unit = event.deltaMode === 1 ? 16 :
-        event.deltaMode === 2 ? scrollList.clientHeight : 1;
-      scrollList.scrollTop += event.deltaY * unit;
-      event.preventDefault();
-    }, {passive: false});
+          scrollList.scrollHeight <= scrollList.clientHeight
+        )
+          return;
+        const unit =
+          event.deltaMode === 1
+            ? 16
+            : event.deltaMode === 2
+              ? scrollList.clientHeight
+              : 1;
+        scrollList.scrollTop += event.deltaY * unit;
+        event.preventDefault();
+      },
+      { passive: false },
+    );
   }
-  subhead.append(back);
-  subhead.hidden = true;
-  sub.append(subhead, sublist);
-  document.body.append(panel, sub);
+
+  pane.append(searchWrap, list, effortBox, speedBox, status);
+  panel.append(rail, pane);
+  document.body.append(panel);
+
   let active = null,
-    provider = null,
-    subCloseTimer = null,
-    providerSwitchTimer = null,
-    providerSwitchProvider = null,
-    providerPointerOrigin = null,
+    activeTab = "pins",
+    userSwitchedTab = false,
     favorites = {},
     favoritesLoading = false,
     favoritesError = "",
     favoritesLoadToken = 0,
     favoriteWrites = Promise.resolve();
+
   const favoritesEndpoint = "/ui/model-favorites";
   function favoritesURL() {
     const url = new URL(favoritesEndpoint, location.href);
-    const form = active?.closest('form');
-    const destination = form?.querySelector('[data-project-input]');
-    const project = form?.elements.namedItem('destination_project')?.value || form?.querySelector('[name="_project_id"]')?.value ||
-      (destination && document.getElementById(destination.dataset.projectInput)?.value) ||
-      active?.closest('[data-project-id]')?.dataset.projectId || '';
-    if (/^r-[a-f0-9]{16}-/.test(project)) url.searchParams.set('project_id', project);
+    const form = active?.closest("form");
+    const destination = form?.querySelector("[data-project-input]");
+    const project =
+      form?.elements.namedItem("destination_project")?.value ||
+      form?.querySelector('[name="_project_id"]')?.value ||
+      (destination &&
+        document.getElementById(destination.dataset.projectInput)?.value) ||
+      active?.closest("[data-project-id]")?.dataset.projectId ||
+      "";
+    if (/^r-[a-f0-9]{16}-/.test(project))
+      url.searchParams.set("project_id", project);
     return url.pathname + url.search;
   }
   async function requestFavorites(payload, endpoint = favoritesURL()) {
@@ -108,12 +134,15 @@
     try {
       await favoriteWrites.catch(() => {});
       let saved = await requestFavorites();
-      const legacy = favoritesURL().includes("project_id=r-") ? {} : read(favoritesKey);
+      const legacy = favoritesURL().includes("project_id=r-")
+        ? {}
+        : read(favoritesKey);
       const importIDs = Object.keys(legacy || {}).filter((id) => legacy[id]);
       if (importIDs.length)
         saved = await requestFavorites({ import_ids: importIDs });
       try {
-        if (!favoritesURL().includes("project_id=r-")) localStorage.removeItem(favoritesKey);
+        if (!favoritesURL().includes("project_id=r-"))
+          localStorage.removeItem(favoritesKey);
       } catch (_) {}
       if (token !== favoritesLoadToken) return;
       favorites = saved;
@@ -126,8 +155,15 @@
       if (token === favoritesLoadToken) {
         favoritesLoading = false;
         panel.removeAttribute("aria-busy");
-        render();
-        renderSub();
+        if (active && !userSwitchedTab && !search.value.trim()) {
+          const nextTab = initialTabForCurrentModel();
+          const changed = nextTab !== activeTab;
+          activeTab = nextTab;
+          render();
+          if (changed) scrollSelectedIntoView();
+        } else {
+          render();
+        }
       }
     }
   }
@@ -208,10 +244,17 @@
   }
   function settingsEndpoint(btn) {
     const form = btn.closest("form");
-    const destination = form.querySelector('[data-project-send-url]:not([data-project-send-url=""])[data-project-input]');
-    const project = destination && document.getElementById(destination.dataset.projectInput)?.value;
+    const destination = form.querySelector(
+      '[data-project-send-url]:not([data-project-send-url=""])[data-project-input]',
+    );
+    const project =
+      destination &&
+      document.getElementById(destination.dataset.projectInput)?.value;
     const endpoint = destination
-      ? (project ? '/conversation/model-settings?project_id=' + encodeURIComponent(project) : '')
+      ? project
+        ? "/conversation/model-settings?project_id=" +
+          encodeURIComponent(project)
+        : ""
       : form.getAttribute("data-model-select-endpoint");
     if (!endpoint) return endpoint;
     const url = new URL(endpoint, window.location.href);
@@ -222,19 +265,25 @@
 
   async function settingsError(response, fallback) {
     let message = fallback;
-    const permissionDenied = response.status === 403 && response.headers.get("X-OpenVibely-Permission-Denied") === "true";
+    const permissionDenied =
+      response.status === 403 &&
+      response.headers.get("X-OpenVibely-Permission-Denied") === "true";
     if (permissionDenied) {
-      message = "You do not have permission to change these model settings. Ask the project owner or an organization admin for access.";
+      message =
+        "You do not have permission to change these model settings. Ask the project owner or an organization admin for access.";
       let toast;
       try {
-        toast = JSON.parse(response.headers.get("HX-Trigger") || "{}").openvibelyToast;
+        toast = JSON.parse(
+          response.headers.get("HX-Trigger") || "{}",
+        ).openvibelyToast;
       } catch (_) {}
       if (typeof toast?.message === "string" && toast.message) {
         message = toast.message;
       } else {
         try {
           const body = await response.json();
-          if (typeof body.message === "string" && body.message) message = body.message;
+          if (typeof body.message === "string" && body.message)
+            message = body.message;
         } catch (_) {}
       }
       if (window.showToast) window.showToast(message, "failed");
@@ -252,26 +301,42 @@
     if (form.dataset.conversationTaskId) return;
     const project = form.querySelector('[name="_project_id"]')?.value;
     if (!project) return;
-    const keys = ["chat-model-", "chat-effort-", "chat-service-tier-"].map(k => k + project);
+    const keys = ["chat-model-", "chat-effort-", "chat-service-tier-"].map(
+      (k) => k + project,
+    );
     let selected, efforts, tiers;
     try {
-      if (!keys.some(k => localStorage.getItem(k) !== null)) return;
+      if (!keys.some((k) => localStorage.getItem(k) !== null)) return;
       selected = localStorage.getItem(keys[0]);
-      efforts = read(keys[1]); tiers = read(keys[2]);
-    } catch (_) { return; }
-    if (!options(btn).some(m => m.id === selected)) selected = btn.dataset.currentValue;
+      efforts = read(keys[1]);
+      tiers = read(keys[2]);
+    } catch (_) {
+      return;
+    }
+    if (!options(btn).some((m) => m.id === selected))
+      selected = btn.dataset.currentValue;
     const overrides = {};
     for (const model of options(btn)) {
       const id = key(model);
       if (efforts[id] !== undefined || tiers[id] !== undefined)
-        overrides[id] = {reasoning_effort: efforts[id] || "", service_tier: tiers[id] || ""};
+        overrides[id] = {
+          reasoning_effort: efforts[id] || "",
+          service_tier: tiers[id] || "",
+        };
     }
     const response = await fetch(settingsEndpoint(btn), {
-      method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({agent_id: selected, import_only: true, overrides}),
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agent_id: selected, import_only: true, overrides }),
     });
-    if (!response.ok) throw await settingsError(response, "Could not migrate model settings. Reopen the picker to retry.");
-    try { keys.forEach(k => localStorage.removeItem(k)); } catch (_) {}
+    if (!response.ok)
+      throw await settingsError(
+        response,
+        "Could not migrate model settings. Reopen the picker to retry.",
+      );
+    try {
+      keys.forEach((k) => localStorage.removeItem(k));
+    } catch (_) {}
   }
   function save(btn) {
     const s = state(btn);
@@ -287,7 +352,11 @@
     });
     const request = () =>
       fetch(endpoint, { method: "POST", body }).then(async (r) => {
-        if (!r.ok) throw await settingsError(r, "Could not save model settings. Try again.");
+        if (!r.ok)
+          throw await settingsError(
+            r,
+            "Could not save model settings. Try again.",
+          );
       });
     s.pending = (s.pending || Promise.resolve()).catch(() => {}).then(request);
     s.pending.then(
@@ -336,12 +405,13 @@
         throw Error("Could not load effort. Reopen the picker to retry.");
       const data = await response.json();
       if (initial && data.agent_id !== undefined) {
-        const selected = options(btn).find(item => item.id === data.agent_id);
+        const selected = options(btn).find((item) => item.id === data.agent_id);
         if (selected) {
           m = selected;
           if (token === s.loadToken) {
             window._setChatCustomSelectValue(btn, selected.id);
-            btn.closest("form").querySelector('[name="agent_id"]').value = selected.id;
+            btn.closest("form").querySelector('[name="agent_id"]').value =
+              selected.id;
           }
         }
       }
@@ -371,26 +441,6 @@
         }
       }
     }
-  }
-  function cancelSubClose() {
-    if (subCloseTimer !== null) clearTimeout(subCloseTimer);
-    subCloseTimer = null;
-  }
-  function cancelProviderSwitch(button) {
-    if (button && providerSwitchProvider !== button.dataset.provider) return;
-    if (providerSwitchTimer !== null) clearTimeout(providerSwitchTimer);
-    providerSwitchTimer = null;
-    providerSwitchProvider = null;
-  }
-  function closeSub() {
-    cancelSubClose();
-    cancelProviderSwitch();
-    provider = null;
-    providerPointerOrigin = null;
-    sub.hidden = true;
-    list
-      .querySelectorAll(".ov-mp-provider")
-      .forEach((b) => b.setAttribute("aria-expanded", "false"));
   }
   function ownerVisible(btn) {
     return (
@@ -423,21 +473,21 @@
     if (!menu) {
       menu = window.ovMenuController.create({
         trigger: btn,
-        panels: () => [panel, sub],
+        panels: () => [panel],
         isOpen: () => active === btn && !panel.hidden,
         open: () => showModelPicker(btn),
         close: hideModelPicker,
-        escape: () => { if (provider) { back.click(); return false; } },
       });
       modelMenus.set(btn, menu);
     }
     return menu;
   }
-  function close(focus) { if (active) modelMenu(active).close(focus); }
+  function close(focus) {
+    if (active) modelMenu(active).close(focus);
+  }
   function hideModelPicker() {
     ownerObserver.disconnect();
     const btn = active;
-    closeSub();
     panel.hidden = true;
     active = null;
     if (btn) {
@@ -458,12 +508,9 @@
       }),
     );
     render();
-    renderSub();
-    if (provider) {
-      sublist
-        .querySelector('[data-model="' + CSS.escape(m.id) + '"]')
-        ?.focus({ preventScroll: true });
-    } else search.focus({ preventScroll: true });
+    const picked = list.querySelector('[data-model="' + CSS.escape(m.id) + '"]');
+    if (picked) picked.focus({ preventScroll: true });
+    else search.focus({ preventScroll: true });
   }
   function activateRow(row, target) {
     if (row.hasAttribute("data-picker-active")) return;
@@ -471,6 +518,35 @@
       .querySelectorAll("[data-picker-active]")
       .forEach((item) => item.removeAttribute("data-picker-active"));
     row.setAttribute("data-picker-active", "");
+  }
+  function providers(all) {
+    return [
+      ...new Set(all.filter((m) => m.provider).map((m) => m.provider)),
+    ].sort();
+  }
+  function initialTabForCurrentModel() {
+    if (!active) return "pins";
+    const all = options(active);
+    const m = current(active);
+    if (!m || !m.provider || favorites[m.id]) return "pins";
+    return providers(all).includes(m.provider) ? m.provider : "pins";
+  }
+  function scrollSelectedIntoView() {
+    railTabs
+      .querySelector('.ov-mp-rail-btn[aria-selected="true"]')
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const selectedRow = list.querySelector('.ov-mp-row[data-selected="true"]');
+    if (selectedRow) selectedRow.scrollIntoView({ block: "nearest" });
+    else list.scrollTop = 0;
+  }
+  function switchTab(tab, clearSearch = false) {
+    userSwitchedTab = true;
+    if (clearSearch && search.value) search.value = "";
+    if (activeTab === tab && !clearSearch) return;
+    activeTab = tab;
+    list.scrollTop = 0;
+    renderRail();
+    renderList();
   }
   function row(m, target) {
     const r = el("div", "ov-menu-row ov-mp-row");
@@ -491,24 +567,25 @@
         const desired = !favorites[m.id];
         if (desired) favorites[m.id] = true;
         else delete favorites[m.id];
+        renderRail();
         renderList();
-        renderSub();
         position();
-        const button = [
-          ...panel.querySelectorAll(".ov-mp-star"),
-          ...sub.querySelectorAll(".ov-mp-star"),
-        ].find((b) => b.dataset.id === m.id);
+        const button = [...panel.querySelectorAll(".ov-mp-star")].find(
+          (b) => b.dataset.id === m.id,
+        );
         button?.focus({ preventScroll: true });
         favoriteWrites = favoriteWrites
           .catch(() => {})
-          .then(() => requestFavorites({ model_id: m.id, favorite: desired }, endpoint));
+          .then(() =>
+            requestFavorites({ model_id: m.id, favorite: desired }, endpoint),
+          );
         favoriteWrites.catch(() => {
           favoritesError =
             "Could not save favorites. Reopen the picker to retry.";
           if (active) {
             status.textContent = favoritesError;
+            renderRail();
             renderList();
-            renderSub();
           }
         });
       };
@@ -537,6 +614,65 @@
     r.prepend(pick);
     target.append(r);
   }
+  function syncRailSelection() {
+    const searching = search.value.trim().length > 0;
+    railTabs.querySelectorAll(".ov-mp-rail-btn").forEach((b) => {
+      b.setAttribute(
+        "aria-selected",
+        String(!searching && activeTab === b.dataset.tab),
+      );
+    });
+  }
+  function renderRail() {
+    if (!active) return;
+    const scroll = railTabs.scrollTop;
+    const all = options(active);
+    const listProviders = providers(all);
+    if (activeTab !== "pins" && !listProviders.includes(activeTab)) {
+      activeTab = "pins";
+    }
+    const existing = [...railTabs.querySelectorAll(".ov-mp-provider")].map(
+      (b) => b.dataset.provider,
+    );
+    const sameProviders =
+      railTabs.children.length === listProviders.length + 1 &&
+      existing.length === listProviders.length &&
+      existing.every((p, i) => p === listProviders[i]);
+    if (sameProviders) {
+      syncRailSelection();
+      return;
+    }
+    railTabs.replaceChildren();
+
+    const pinsBtn = el("button", "ov-mp-rail-btn");
+    pinsBtn.type = "button";
+    pinsBtn.setAttribute("role", "tab");
+    pinsBtn.dataset.tab = "pins";
+    pinsBtn.setAttribute("aria-label", "Favorites");
+    pinsBtn.innerHTML = icons.__pins || "★";
+    pinsBtn.onpointerenter = (e) => {
+      if (e.pointerType !== "touch" && !search.value.trim()) switchTab("pins");
+    };
+    pinsBtn.onclick = () => switchTab("pins", true);
+    railTabs.append(pinsBtn);
+
+    listProviders.forEach((p) => {
+      const b = el("button", "ov-mp-rail-btn ov-mp-provider");
+      b.type = "button";
+      b.setAttribute("role", "tab");
+      b.dataset.tab = p;
+      b.dataset.provider = p;
+      b.setAttribute("aria-label", p);
+      b.innerHTML = icons[p] || icons.__fallback || "";
+      b.onpointerenter = (e) => {
+        if (e.pointerType !== "touch" && !search.value.trim()) switchTab(p);
+      };
+      b.onclick = () => switchTab(p, true);
+      railTabs.append(b);
+    });
+    syncRailSelection();
+    railTabs.scrollTop = scroll;
+  }
   function renderList() {
     if (!active) return;
     const scroll = list.scrollTop,
@@ -556,121 +692,27 @@
         list.append(el("div", "ov-mp-empty", "No matching models"));
       return;
     }
-    [
-      ...new Set(
-        all
-          .filter((m) => m.provider && !favorites[m.id])
-          .map((m) => m.provider),
-      ),
-    ]
-      .sort()
-      .forEach((p) => {
-        const b = el("button", "ov-menu-option ov-mp-provider");
-        b.type = "button";
-        b.dataset.provider = p;
-        b.onpointermove = () => {
-          if (providerSwitchProvider !== p) activateRow(b, list);
-        };
-        b.onfocus = () => activateRow(b, list);
-        b.onpointerenter = (e) => {
-          if (e.pointerType !== "touch") hoverProvider(p, e);
-        };
-        b.onpointerleave = () => cancelProviderSwitch(b);
-        b.setAttribute("aria-haspopup", "dialog");
-        b.setAttribute("aria-controls", sub.id);
-        b.setAttribute("aria-expanded", String(provider === p));
-        b.append(el("span", "", p), el("span", "", "›"));
-        b.onclick = (e) => {
-          openProvider(p);
-          if (e.detail) providerPointerOrigin = { x: e.clientX, y: e.clientY };
-        };
-        list.append(b);
-      });
-    const defaults = all.filter((m) => !m.provider);
-    if (defaults.length) {
-      if (list.children.length)
-        list.append(el("div", "ov-menu-rule ov-mp-rule"));
-      defaults.forEach((m) => row(m, list));
-    }
-    const fav = sortModelsByName(
-      all.filter((m) => m.provider && favorites[m.id]),
-    );
-    if (fav.length) {
-      if (list.children.length)
-        list.append(el("div", "ov-menu-rule ov-mp-rule"));
-      list.append(el("div", "ov-menu-heading ov-mp-heading", "FAVORITES"));
+    if (activeTab === "pins") {
+      const fav = sortModelsByName(
+        all.filter((m) => m.provider && favorites[m.id]),
+      );
       fav.forEach((m) => row(m, list));
+      const defaults = all.filter((m) => !m.provider);
+      if (defaults.length) {
+        if (fav.length) list.append(el("div", "ov-menu-rule ov-mp-rule"));
+        defaults.forEach((m) => row(m, list));
+      }
+      if (!list.children.length)
+        list.append(el("div", "ov-mp-empty", "No pinned models yet"));
+    } else {
+      const group = sortModelsByName(
+        all.filter((m) => m.provider === activeTab),
+      );
+      group.forEach((m) => row(m, list));
+      if (!group.length)
+        list.append(el("div", "ov-mp-empty", "No models for this provider"));
     }
     list.scrollTop = scroll;
-  }
-  function openProvider(p) {
-    cancelSubClose();
-    cancelProviderSwitch();
-    if (provider === p && !sub.hidden) return;
-    providerPointerOrigin = null;
-    provider = p;
-    list.querySelectorAll(".ov-mp-provider").forEach((b) => {
-      b.setAttribute("aria-expanded", String(b.dataset.provider === p));
-    });
-    renderSub();
-  }
-  function hoverProvider(p, event) {
-    if (provider === p) {
-      cancelSubClose();
-      cancelProviderSwitch();
-      providerPointerOrigin = { x: event.clientX, y: event.clientY };
-      return;
-    }
-    if (provider && !sub.hidden && providerPointerOrigin) {
-      const bounds = sub.getBoundingClientRect();
-      const right = bounds.left >= panel.getBoundingClientRect().right - 8;
-      const toward = right
-        ? event.clientX > providerPointerOrigin.x + 8
-        : event.clientX < providerPointerOrigin.x - 8;
-      if (
-        toward &&
-        event.clientY >= bounds.top - 12 &&
-        event.clientY <= bounds.bottom + 12
-      ) {
-        cancelProviderSwitch();
-        providerSwitchProvider = p;
-        providerSwitchTimer = setTimeout(() => {
-          // Favorites loading can re-render the provider list while the switch is pending.
-          if (
-            active &&
-            providerSwitchProvider === p &&
-            list.querySelector(
-              '.ov-mp-provider[data-provider="' + CSS.escape(p) + '"]',
-            )
-          ) {
-            openProvider(p);
-            providerPointerOrigin = { x: event.clientX, y: event.clientY };
-          }
-        }, 300);
-        return;
-      }
-    }
-    openProvider(p);
-    providerPointerOrigin = { x: event.clientX, y: event.clientY };
-  }
-  function renderSub() {
-    if (!active || !provider) {
-      sub.hidden = true;
-      return;
-    }
-    sublist.replaceChildren();
-    sub.setAttribute("aria-label", provider + " models");
-    sortModelsByName(
-      options(active).filter(
-        (m) => m.provider === provider && !favorites[m.id],
-      ),
-    ).forEach((m) => row(m, sublist));
-    if (!sublist.children.length) {
-      closeSub();
-      return;
-    }
-    sub.hidden = false;
-    positionSub();
   }
   function renderEffort() {
     renderSpeed();
@@ -683,8 +725,17 @@
       value = override || m.defaultEffort;
     const levels = m.defaultEffort ? m.levels : ["", ...m.levels];
     const head = el("div", "ov-mp-effort-head");
-    head.append(el("span", "", "Reasoning effort"));
-    effortBox.append(head);
+    head.hidden = !override;
+    const reset = el("button", "ov-mp-reset", "Use default");
+    reset.type = "button";
+    reset.hidden = !override;
+    reset.disabled = s.loading;
+    reset.onclick = () => {
+      delete s.efforts[key(m)];
+      save(active);
+      renderEffort();
+    };
+    head.append(reset);
     const slider = el("input");
     slider.type = "range";
     slider.min = "0";
@@ -705,13 +756,16 @@
     );
     slider.oninput = () => {
       updateTrack();
-      const value = levels[Number(slider.value)];
-      s.efforts[key(m)] = value;
+      const chosen = levels[Number(slider.value)];
+      s.efforts[key(m)] = chosen;
       sync(active);
-      reset.hidden = !value;
+      const hasOverride = !!field(active).value;
+      reset.hidden = !hasOverride;
+      head.hidden = !hasOverride;
+      position();
       slider.setAttribute(
         "aria-valuetext",
-        value ? label(value) : "Model default",
+        chosen ? label(chosen) : "Model default",
       );
     };
     slider.onchange = () => {
@@ -722,17 +776,7 @@
     levels.forEach((v) =>
       ticks.append(el("span", "", v ? label(v) : "Default")),
     );
-    const reset = el("button", "ov-mp-reset", "Use default");
-    reset.type = "button";
-    reset.hidden = !override;
-    reset.disabled = s.loading;
-    reset.onclick = () => {
-      delete s.efforts[key(m)];
-      save(active);
-      renderEffort();
-    };
-    head.append(reset);
-    effortBox.append(slider, ticks);
+    effortBox.append(head, slider, ticks);
   }
   function renderSpeed() {
     speedBox.replaceChildren();
@@ -741,7 +785,7 @@
     if (speedBox.hidden) return;
     const s = state(active),
       override = s.tiers[key(m)] || "";
-    const row = el("div", "ov-mp-speed-row"),
+    const rowEl = el("div", "ov-mp-speed-row"),
       title = el("span", "", "Fast mode");
     title.id = "ov-mp-fast-label";
     const actions = el("div", "ov-mp-speed-actions");
@@ -770,19 +814,17 @@
       renderEffort();
     };
     actions.append(reset, toggle);
-    row.append(title, actions);
-    speedBox.append(row);
+    rowEl.append(title, actions);
+    speedBox.append(rowEl);
   }
   function render() {
     if (!active) return;
-    const atEnd =
-      !search.value.trim() &&
-      list.scrollTop + list.clientHeight >= list.scrollHeight - 1;
+    renderRail();
     renderList();
     renderEffort();
-    status.textContent = inlineSettingsError(state(active)) || favoritesError || "";
+    status.textContent =
+      inlineSettingsError(state(active)) || favoritesError || "";
     position();
-    if (atEnd) list.scrollTop = list.scrollHeight;
   }
   function position() {
     if (!active) return;
@@ -804,35 +846,6 @@
       Math.max(8, Math.min(r.left, width - panel.offsetWidth - 8)) + "px";
     panel.style.top =
       (up ? Math.max(8, r.top - panel.offsetHeight - 6) : r.bottom + 6) + "px";
-    positionSub();
-  }
-  function positionSub() {
-    if (active && provider && !sub.hidden) {
-      const b = [...list.querySelectorAll(".ov-mp-provider")].find(
-        (b) => b.dataset.provider === provider,
-      );
-      if (!b) {
-        closeSub();
-        return;
-      }
-      const height = window.innerHeight,
-        width = window.innerWidth,
-        p = panel.getBoundingClientRect(),
-        a = b.getBoundingClientRect();
-      let left = p.right - 4;
-      if (left + sub.offsetWidth > width - 8)
-        left = p.left - sub.offsetWidth + 4;
-      subhead.hidden = left >= 8;
-      if (left < 8) {
-        left = p.left;
-        sub.style.width = p.width + "px";
-      } else sub.style.width = "300px";
-      sub.style.maxHeight = height - 16 + "px";
-      sublist.style.maxHeight = Math.max(80, height - 80) + "px";
-      sub.style.left = Math.max(8, left) + "px";
-      sub.style.top =
-        Math.max(8, Math.min(a.top, height - sub.offsetHeight - 8)) + "px";
-    }
   }
   function usesAppleShortcuts() {
     return /Mac|iPhone|iPad|iPod|iOS/i.test(
@@ -847,7 +860,6 @@
     btn.setAttribute("aria-keyshortcuts", apple ? "Meta+M" : "Control+M");
     btn.title = apple ? "Models (⌘M)" : "Models (Ctrl+M)";
     if (state(btn)) return;
-    const form = btn.closest("form");
     btn._ovModelState = {
       efforts: {},
       tiers: {},
@@ -882,34 +894,38 @@
       .catch(() => {});
   }
   function showModelPicker(btn) {
-      if (!ownerVisible(btn)) return;
-      init(btn);
-      active = btn;
-      provider = null;
-      search.value = "";
-      panel.hidden = false;
-      btn.setAttribute("aria-expanded", "true");
-      render();
-      list.scrollTop = list.scrollHeight;
-      renderSub();
-      loadFavorites();
-      search.focus({ preventScroll: true });
-      observeOwner();
-      const s = state(btn);
-      if (s.error) {
-        s.ready = s.failedSave
-          ? save(btn).catch(() => {})
-          : s.selectionPending
-            ? loadSelection(btn)
-            : load(btn);
-      }
+    if (!ownerVisible(btn)) return;
+    init(btn);
+    active = btn;
+    userSwitchedTab = false;
+    activeTab = initialTabForCurrentModel();
+    search.value = "";
+    panel.hidden = false;
+    btn.setAttribute("aria-expanded", "true");
+    render();
+    scrollSelectedIntoView();
+    loadFavorites();
+    search.focus({ preventScroll: true });
+    observeOwner();
+    const s = state(btn);
+    if (s.error) {
+      s.ready = s.failedSave
+        ? save(btn).catch(() => {})
+        : s.selectionPending
+          ? loadSelection(btn)
+          : load(btn);
+    }
   }
   window.ovModelPicker = {
     init,
     save,
     close,
-    open(btn) { if (ownerVisible(btn)) modelMenu(btn).open(); },
-    toggle(btn, event) { if (ownerVisible(btn)) modelMenu(btn).toggle(event); },
+    open(btn) {
+      if (ownerVisible(btn)) modelMenu(btn).open();
+    },
+    toggle(btn, event) {
+      if (ownerVisible(btn)) modelMenu(btn).toggle(event);
+    },
     destinationLoading(btn) {
       init(btn);
       const s = state(btn);
@@ -943,26 +959,33 @@
       } else save(btn);
     },
   };
+  manageBtn.onclick = () => {
+    const btn = active;
+    close(false);
+    const navLink = document.querySelector(
+      '#appearance-settings-nav [data-nav-base="/models"], [data-nav-base="/models"]',
+    );
+    if (navLink) {
+      navLink.click();
+      return;
+    }
+    const project =
+      btn?.closest("form")?.querySelector('[name="_project_id"]')?.value ||
+      document.getElementById("project-selector")?.value ||
+      "";
+    const url = project
+      ? "/models?project_id=" + encodeURIComponent(project)
+      : "/models";
+    window.location.assign(url);
+  };
   panel.onpointerover = (e) => {
     if (e.pointerType === "touch") return;
-    if (!e.target.closest(".ov-mp-row,.ov-mp-provider"))
+    if (!e.target.closest(".ov-mp-row"))
       list
         .querySelectorAll("[data-picker-active]")
-        .forEach((row) => row.removeAttribute("data-picker-active"));
-    if (!provider) return;
-    if (e.target.closest(".ov-mp-provider")) cancelSubClose();
-    else if (
-      e.target.closest(".ov-mp-row,.ov-mp-search,.ov-mp-effort,.ov-mp-speed")
-    )
-      closeSub();
-    else if (subCloseTimer === null) subCloseTimer = setTimeout(closeSub, 350);
-  };
-  sub.onpointerenter = () => {
-    cancelSubClose();
-    cancelProviderSwitch();
+        .forEach((rowEl) => rowEl.removeAttribute("data-picker-active"));
   };
   search.oninput = () => {
-    closeSub();
     list.scrollTop = 0;
     render();
   };
@@ -970,13 +993,6 @@
     search.value = "";
     render();
     search.focus();
-  };
-  back.onclick = () => {
-    const old = provider;
-    closeSub();
-    [...list.querySelectorAll(".ov-mp-provider")]
-      .find((b) => b.dataset.provider === old)
-      ?.focus();
   };
   document.addEventListener(
     "keydown",
@@ -1021,16 +1037,28 @@
         else window.ovModelPicker.open(btn);
         return;
       }
-      if (!active || e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
-      if (e.key === "ArrowLeft" && provider && e.target !== search) {
-        e.preventDefault();
-        back.click();
+      if (!active || e.defaultPrevented || e.isComposing || e.keyCode === 229)
+        return;
+      if (e.key === "ArrowRight" && document.activeElement?.closest(".ov-mp-rail-tabs")) {
+        const firstPick = list.querySelector(".ov-mp-pick");
+        if (firstPick) {
+          e.preventDefault();
+          firstPick.focus({ preventScroll: true });
+          window.openVibelyScrollIntoPanel?.(firstPick);
+        }
         return;
       }
-      if (e.key === "ArrowRight" && e.target.matches(".ov-mp-provider")) {
-        e.preventDefault();
-        e.target.click();
-        sublist.querySelector(".ov-mp-pick")?.focus();
+      if (
+        e.key === "ArrowLeft" &&
+        document.activeElement?.closest(".ov-mp-list")
+      ) {
+        const tab =
+          railTabs.querySelector('.ov-mp-rail-btn[aria-selected="true"]') ||
+          railTabs.querySelector(".ov-mp-rail-btn");
+        if (tab) {
+          e.preventDefault();
+          tab.focus({ preventScroll: true });
+        }
         return;
       }
       if (
@@ -1038,8 +1066,23 @@
         !["ArrowDown", "ArrowUp"].includes(e.key)
       )
         return;
-      const root = provider ? sublist : list,
-        rows = [...root.querySelectorAll(".ov-mp-pick,.ov-mp-provider")];
+      if (document.activeElement?.closest(".ov-mp-rail-tabs")) {
+        const tabs = [...railTabs.querySelectorAll(".ov-mp-rail-btn")];
+        if (!tabs.length) return;
+        e.preventDefault();
+        const i = tabs.indexOf(document.activeElement),
+          next =
+            e.key === "ArrowDown"
+              ? (i + 1) % tabs.length
+              : i <= 0
+                ? tabs.length - 1
+                : i - 1;
+        tabs[next].focus({ preventScroll: true });
+        switchTab(tabs[next].dataset.tab, true);
+        tabs[next].scrollIntoView({ block: "nearest" });
+        return;
+      }
+      const rows = [...list.querySelectorAll(".ov-mp-pick")];
       if (!rows.length) return;
       e.preventDefault();
       const i = rows.indexOf(document.activeElement),
@@ -1050,7 +1093,9 @@
               ? rows.length - 1
               : i - 1;
       rows[next].focus({ preventScroll: true });
-      window.openVibelyScrollIntoPanel(rows[next]);
+      if (window.openVibelyScrollIntoPanel)
+        window.openVibelyScrollIntoPanel(rows[next]);
+      else rows[next].scrollIntoView({ block: "nearest" });
     },
     true,
   );
@@ -1058,9 +1103,7 @@
   document.addEventListener(
     "scroll",
     (e) => {
-      if (active && !panel.contains(e.target) && !sub.contains(e.target))
-        position();
-      else if (active && provider) positionSub();
+      if (active && !panel.contains(e.target)) position();
     },
     true,
   );

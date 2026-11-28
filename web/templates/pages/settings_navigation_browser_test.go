@@ -222,10 +222,11 @@ func TestBrowserFunctional_SettingsClosesConversationModelPicker(t *testing.T) {
 		}
 		var content templ.Component
 		switch r.URL.Path {
-		case "/themes":
-			content = ThemesContent(nil)
-		case "/chat", "/tasks/picker-thread":
-			content = components.ChatInputForm(components.ChatInputFormConfig{
+			case "/themes":
+				content = ThemesContent(nil)
+			case "/models":
+				content = templ.Raw(`<div id="models-container">Models</div>`)
+			case "/chat", "/tasks/picker-thread":			content = components.ChatInputForm(components.ChatInputFormConfig{
 				FormID: "picker-form", InputID: "picker-message", TargetID: "messages",
 				PostEndpoint: "/chat/send", ProjectID: "project", ShowModelSelector: true, ShowModeSelector: true,
 				Agents:          []models.LLMConfig{{ID: "model", Name: "Test model", Provider: models.ProviderOpenAI, Model: "test"}},
@@ -251,19 +252,22 @@ func TestBrowserFunctional_SettingsClosesConversationModelPicker(t *testing.T) {
 			runComposerFocusCDP(t, chrome, server.URL+route, "settings-picker", func(b *composerFocusCDP) {
 				b.waitFor("picker ready", `String(document.readyState==='complete' && !!window.ovModelPicker && !!window.workspaceNavigation && !!document.querySelector('.chat-model-select'))`, "true")
 				b.waitFor("shared selector chevron spacing", `String(Array.from(document.querySelectorAll('.chat-model-select,.chat-mode-select')).every(b=>{const label=b.querySelector('.chat-custom-select-label').getBoundingClientRect(),arrow=b.querySelector('svg').getBoundingClientRect(),rect=b.getBoundingClientRect();return Math.abs(arrow.left-label.right-10)<.1&&Math.abs(rect.right-arrow.right-4)<.1}))`, "true")
-				b.evaluate(`window.originalPickerButton=document.querySelector('.chat-model-select');window.ovModelPicker.open(window.originalPickerButton);'opened'`)
-				b.waitFor("picker visible", `String(!document.getElementById('conversation-model-picker').hidden)`, "true")
-				b.click(`#conversation-model-picker .ov-mp-provider`)
-				b.waitFor("submenu visible", `String(!document.getElementById('conversation-provider-models').hidden)`, "true")
-				b.evaluate(`window.pickerNavigationRequests=0;document.addEventListener('htmx:beforeRequest',()=>window.pickerNavigationRequests++);window.pickerOriginalURL=location.href;'watch navigation'`)
-				b.clickMenuBackdrop(`#sidebar [data-nav-base="/themes"]`)
-				b.waitFor("first click only dismisses", `String(document.getElementById('conversation-model-picker').hidden && document.getElementById('conversation-provider-models').hidden && window.originalPickerButton.getAttribute('aria-expanded')==='false' && location.href===window.pickerOriginalURL && !document.getElementById('settings-retained-workspace') && window.pickerNavigationRequests===0 && !window._sidebarNavigating)`, "true")
-				b.click(`#sidebar [data-nav-base="/themes"]`)
-				b.waitFor("workspace hidden in settings", `String(!!document.getElementById('themes-container') && !!window.originalPickerButton.closest('#settings-retained-workspace'))`, "true")
-				b.waitFor("picker and submenu dismissed", `String(document.getElementById('conversation-model-picker').hidden && document.getElementById('conversation-provider-models').hidden && window.originalPickerButton.getAttribute('aria-expanded')==='false')`, "true")
-				b.evaluate(`window.restoreSettingsWorkspace(false);window.ovModelPicker.open(window.originalPickerButton);'reopened'`)
-				b.waitFor("retained picker usable", `String(window.originalPickerButton.isConnected && !document.getElementById('conversation-model-picker').hidden)`, "true")
-				// Every shared menu consumes dismissal before Settings' capture handler.
+					b.evaluate(`window.originalPickerButton=document.querySelector('.chat-model-select');window.ovModelPicker.open(window.originalPickerButton);'opened'`)
+					b.waitFor("picker visible", `String(!document.getElementById('conversation-model-picker').hidden)`, "true")
+					b.click(`#conversation-model-picker .ov-mp-provider`)
+					b.waitFor("provider tab active", `String(document.querySelector('#conversation-model-picker .ov-mp-provider')?.getAttribute('aria-selected')==='true')`, "true")
+					b.evaluate(`window.pickerNavigationRequests=0;document.addEventListener('htmx:beforeRequest',()=>window.pickerNavigationRequests++);window.pickerOriginalURL=location.href;'watch navigation'`)
+					b.clickMenuBackdrop(`#sidebar [data-nav-base="/themes"]`)
+					b.waitFor("first click only dismisses", `String(document.getElementById('conversation-model-picker').hidden && window.originalPickerButton.getAttribute('aria-expanded')==='false' && location.href===window.pickerOriginalURL && !document.getElementById('settings-retained-workspace') && window.pickerNavigationRequests===0 && !window._sidebarNavigating)`, "true")
+					b.click(`#sidebar [data-nav-base="/themes"]`)
+					b.waitFor("workspace hidden in settings", `String(!!document.getElementById('themes-container') && !!window.originalPickerButton.closest('#settings-retained-workspace'))`, "true")
+					b.waitFor("picker dismissed", `String(document.getElementById('conversation-model-picker').hidden && window.originalPickerButton.getAttribute('aria-expanded')==='false')`, "true")
+					b.evaluate(`window.restoreSettingsWorkspace(false);window.ovModelPicker.open(window.originalPickerButton);'reopened'`)
+					b.waitFor("retained picker usable", `String(window.originalPickerButton.isConnected && !document.getElementById('conversation-model-picker').hidden)`, "true")
+					b.click(`#conversation-model-picker .ov-mp-rail-action`)
+					b.waitFor("manage models gear dismisses picker and navigates to models", `String(document.getElementById('conversation-model-picker').hidden && !!document.getElementById('models-container') && !!window.originalPickerButton.closest('#settings-retained-workspace'))`, "true")
+					b.evaluate(`window.restoreSettingsWorkspace(false);window.ovModelPicker.open(window.originalPickerButton);'reopened-after-models'`)
+					b.waitFor("picker reopens after returning from models", `String(window.originalPickerButton.isConnected && !document.getElementById('conversation-model-picker').hidden)`, "true")				// Every shared menu consumes dismissal before Settings' capture handler.
 				windowClose := `window.ovModelPicker.close(false);`
 				for _, menu := range []struct{ name, open, closed string }{
 					{"mode", `window._openChatCustomSelectPanel(document.querySelector('.chat-mode-select'))`, `document.getElementById('chat-custom-select-panel').style.display==='none'`},
