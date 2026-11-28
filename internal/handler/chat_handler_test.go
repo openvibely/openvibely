@@ -2420,15 +2420,11 @@ func TestHandler_Chat_TaskLinksConvertedOnHTMXNavigation(t *testing.T) {
 	assert.Contains(t, body, "[TASK_ID:abc123def456]")
 	assert.Contains(t, body, "Build API endpoint")
 
-	// The JavaScript should use setTimeout for immediate execution (not DOMContentLoaded)
-	// This ensures task links are converted even on HTMX navigation
-	assert.Contains(t, body, "setTimeout(function()")
+	// The fragment initializes the transcript and applies its message transforms.
+	assert.Contains(t, body, "setTimeout(function() { window.initializeChatTranscriptScroll(); }, 0)")
+	assert.Contains(t, body, "window.applyChatBubbleTransforms(chatMessages)")
 	assert.Contains(t, body, "convertTaskLinksInMessage(bubble)")
 	assert.Contains(t, body, "convertTaskEditLinksInMessage(bubble)")
-
-	// Should NOT rely on DOMContentLoaded for converting links (it doesn't fire on HTMX swap)
-	assert.NotContains(t, body, "document.addEventListener('DOMContentLoaded'")
-	assert.NotContains(t, body, `document.addEventListener("DOMContentLoaded"`)
 
 	// Should guard against duplicate event listener registration on repeated HTMX navigations
 	assert.Contains(t, body, "_chatSwapHandlerAttached")

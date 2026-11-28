@@ -33,6 +33,7 @@ func TestChatResponseBrowserScrollsWithoutPaging(t *testing.T) {
 	for i := 0; i < 40; i++ {
 		fmt.Fprintf(&output, "**visible-%02d**\n[Using tool: shell | echo result]\n[Tool shell done]\nresult %d\n[/Tool]\n", i, i)
 	}
+	output.WriteString("\nCreated 1 task(s):\n- \"Build API endpoint\" (backlog) [TASK_ID:abc123def456]")
 	require.NoError(t, h.execRepo.Complete(context.Background(), execution.ID, models.ExecCompleted, output.String(), "", 0, 0))
 	result := make(chan string, 1)
 	runner := `<script>(async()=>{
@@ -59,6 +60,9 @@ func TestChatResponseBrowserScrollsWithoutPaging(t *testing.T) {
   await window.renderVisibleChatRows?.(m);
   await wait(()=>shown('visible-39'));
  }
+ const previous=messages();
+ await window.htmx.ajax('GET',location.pathname+location.search,{target:'#main-content',swap:'innerHTML'});
+ await wait(()=>!previous.isConnected && messages()?.querySelector('a[href^="/tasks/abc123def456"]'));
  await fetch('/page-result',{method:'POST',body:'pass'});
  }catch(err){await fetch('/page-result',{method:'POST',body:String(err.stack||err)})}
  })();</script>`
