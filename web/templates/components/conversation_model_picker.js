@@ -2,7 +2,8 @@
   "use strict";
   if (window.ovModelPicker) return;
   const favoritesKey = "openvibely-model-favorites";
-  const icons = window._ovModelProviderIcons || {};
+  const providerIcons = () => window._ovModelProviderIcons || {};
+  let iconsLoaded = false;
   const read = (key) => {
     try {
       return JSON.parse(localStorage.getItem(key) || "{}");
@@ -33,7 +34,6 @@
   manageBtn.type = "button";
   manageBtn.setAttribute("aria-label", "Manage models");
   manageBtn.title = "Manage models";
-  manageBtn.innerHTML = icons.__manage || "";
   railFooter.append(manageBtn);
   railInner.append(railTabs, railFooter);
   rail.append(railInner);
@@ -634,6 +634,11 @@
   }
   function renderRail() {
     if (!active) return;
+    const icons = providerIcons();
+    const hasIcons = !!window._ovModelProviderIcons;
+    if (!manageBtn.innerHTML && icons.__manage) {
+      manageBtn.innerHTML = icons.__manage;
+    }
     const scroll = railTabs.scrollTop;
     const all = options(active);
     const listProviders = providers(all);
@@ -644,6 +649,7 @@
       (b) => b.dataset.provider,
     );
     const sameProviders =
+      iconsLoaded === hasIcons &&
       railTabs.children.length === listProviders.length + 1 &&
       existing.length === listProviders.length &&
       existing.every((p, i) => p === listProviders[i]);
@@ -651,6 +657,7 @@
       syncRailSelection();
       return;
     }
+    iconsLoaded = hasIcons;
     railTabs.replaceChildren();
 
     const pinsBtn = el("button", "ov-mp-rail-btn");

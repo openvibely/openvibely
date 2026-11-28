@@ -1,7 +1,10 @@
 package components
 
 import (
+	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -9,17 +12,29 @@ import (
 )
 
 func TestConversationModelPickerIconsCoverAllProviders(t *testing.T) {
-	start := strings.Index(conversationModelPickerIconsJS, "var i={")
+	srcBytes, err := os.ReadFile(filepath.Join("..", "..", "assets", "model-provider-icons.js"))
+	if err != nil {
+		t.Fatalf("read assets/model-provider-icons.js: %v", err)
+	}
+	distBytes, err := os.ReadFile(filepath.Join("..", "..", "static", "dist", "model-provider-icons.js"))
+	if err != nil {
+		t.Fatalf("read static/dist/model-provider-icons.js: %v", err)
+	}
+	if !bytes.Equal(srcBytes, distBytes) {
+		t.Fatal("web/static/dist/model-provider-icons.js is out of sync with web/assets/model-provider-icons.js")
+	}
+	raw := string(srcBytes)
+	start := strings.Index(raw, "var i={")
 	if start < 0 {
-		t.Fatal("could not locate icon map in conversation_model_picker_icons.js")
+		t.Fatal("could not locate icon map in model-provider-icons.js")
 	}
 	jsonStart := start + len("var i=")
-	end := strings.Index(conversationModelPickerIconsJS[jsonStart:], "};")
+	end := strings.Index(raw[jsonStart:], "};")
 	if end < 0 {
-		t.Fatal("could not locate end of icon map in conversation_model_picker_icons.js")
+		t.Fatal("could not locate end of icon map in model-provider-icons.js")
 	}
 	var icons map[string]string
-	if err := json.Unmarshal([]byte(conversationModelPickerIconsJS[jsonStart:jsonStart+end+1]), &icons); err != nil {
+	if err := json.Unmarshal([]byte(raw[jsonStart:jsonStart+end+1]), &icons); err != nil {
 		t.Fatalf("parse icons json: %v", err)
 	}
 	for _, pair := range [][2]string{
@@ -27,7 +42,7 @@ func TestConversationModelPickerIconsCoverAllProviders(t *testing.T) {
 		{"StepFun Step Plan", "StepFun"},
 		{"Tencent TokenHub Intl", "Tencent TokenHub"},
 	} {
-		if strings.Contains(conversationModelPickerIconsJS, `i["`+pair[0]+`"]=i["`+pair[1]+`"]`) {
+		if strings.Contains(raw, `i["`+pair[0]+`"]=i["`+pair[1]+`"]`) {
 			icons[pair[0]] = icons[pair[1]]
 		}
 	}

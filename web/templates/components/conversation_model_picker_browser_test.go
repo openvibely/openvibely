@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/openvibely/openvibely/internal/models"
+	"github.com/openvibely/openvibely/web/static"
 )
 
 func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
@@ -35,6 +36,9 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
 	favorites := map[string]bool{}
 	pickerSettings := browserConversationSettings("m0")
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if static.ServeAsset(w, r) {
+			return
+		}
 		if pickerSettings(w, r) {
 			return
 		}
@@ -65,8 +69,7 @@ func TestBrowserFunctional_ConversationModelPicker(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(favorites)
 			return
 		}
-		fmt.Fprint(w, `<!doctype html><html><head><style>body{background:#1d232a;color:#eee;font-family:sans-serif;margin:20px}form{margin-top:650px}button{font:inherit}</style></head><body data-test-result="pending"><script>localStorage.clear();window.htmx={process:function(){}};</script>`+content.String()+`<div id="browser-result"></div><script>
- (async function(){
+		fmt.Fprint(w, `<!doctype html><html><head><script src="`+static.URL("model-provider-icons.js")+`"></script><style>body{background:#1d232a;color:#eee;font-family:sans-serif;margin:20px}form{margin-top:650px}button{font:inherit}</style></head><body data-test-result="pending"><script>localStorage.clear();window.htmx={process:function(){}};</script>`+content.String()+`<div id="browser-result"></div><script> (async function(){
  const assert=(ok,msg)=>{if(!ok)throw Error(msg)},wait=()=>new Promise(r=>setTimeout(r,30)),nextFrame=()=>new Promise(r=>requestAnimationFrame(r));
  try{
  let favoriteReads=0;const baseFetch=window.fetch.bind(window);

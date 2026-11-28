@@ -11,6 +11,7 @@ import (
 var layoutAssets = []string{
 	"app.css",
 	"permission-errors.js",
+	"model-provider-icons.js",
 	"chat-input-requests.js",
 	"thread-empty-stage.js",
 	"ov-avatar.png",

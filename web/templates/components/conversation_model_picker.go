@@ -7,18 +7,11 @@ import (
 	"github.com/openvibely/openvibely/internal/models"
 )
 
-//go:embed conversation_model_picker_icons.js
-var conversationModelPickerIconsJS string
-
 //go:embed conversation_model_picker.js
 var conversationModelPickerJS string
 
 //go:embed conversation_model_picker.css
 var conversationModelPickerCSS string
-
-func init() {
-	conversationModelPickerJS = conversationModelPickerIconsJS + "\n" + conversationModelPickerJS
-}
 
 func pickerProvider(c models.LLMConfig) string {
 	switch c.Provider {
